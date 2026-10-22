@@ -1316,6 +1316,19 @@
 }
 .ev-header-btn.show { display: flex !important; }
 
+/* ── BOILER STANDBY ── */
+@keyframes sbBlink{
+  0%,100%{box-shadow:0 0 0 0 rgba(239,68,68,.55);background:#fef2f2;}
+  50%{box-shadow:0 0 18px 4px rgba(239,68,68,.45);background:#fecaca;}
+}
+.sb-card{background:white;border-radius:var(--radius-md);box-shadow:var(--shadow-sm);border-left:4px solid var(--primary);padding:14px 16px;}
+.sb-card.due{border-left-color:#f59e0b;background:#fffbeb;}
+.sb-card.late{border-left-color:#dc2626;animation:sbBlink 1s ease-in-out infinite;}
+.sb-btn{width:100%;margin-top:10px;padding:11px;border:none;border-radius:12px;font-size:13px;font-weight:700;color:white;cursor:pointer;font-family:inherit;background:linear-gradient(135deg,var(--primary-dark),var(--primary));display:flex;align-items:center;justify-content:center;gap:8px;}
+.sb-card.late .sb-btn{background:linear-gradient(135deg,#b91c1c,#dc2626);}
+.sb-card.due .sb-btn{background:linear-gradient(135deg,#d97706,#f59e0b);}
+.sb-over td{background:#fee2e2!important;color:#b91c1c!important;font-weight:700;}
+
 /* ── HEATLOSS FORM (isi manual) ── */
 .hlf-modal{position:fixed;inset:0;z-index:9500;background:white;display:none;flex-direction:column;font-family:'Poppins',sans-serif;}
 .hlf-modal.open{display:flex;}
@@ -1926,6 +1939,7 @@
     </div>
   </div>
   <div id="notif-area" class="px-4 mt-4 space-y-2"></div>
+  <div id="standby-card-area" class="px-4 mt-3" style="display:none;"></div>
   <div id="hm-carousel-wrap" class="px-4 mt-3" style="display:none;">
   <div id="hm-track" style="display:flex;overflow-x:auto;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;border-radius:16px;"></div>
   <div id="hm-dots" style="display:flex;justify-content:center;gap:6px;margin-top:8px;"></div>
@@ -2657,6 +2671,45 @@
 </div>
 
 
+<!-- ===== MODAL FORM BOILER STANDBY ===== -->
+<div id="modal-standby" class="modal-bs">
+  <div class="modal-overlay" onclick="closeStandbyForm()"></div>
+  <div class="modal-sheet" style="max-height:95vh;">
+    <div class="modal-handle"></div>
+    <div class="flex justify-between items-start px-5 pt-4 pb-3 border-b border-gray-100 flex-shrink-0">
+      <div>
+        <h2 class="text-lg font-bold text-gray-900">Form Boiler Standby</h2>
+        <p class="text-sm text-gray-500 mt-0.5" id="sb-form-unit">—</p>
+      </div>
+      <button onclick="closeStandbyForm()" class="text-2xl text-gray-400 w-10 h-10 flex items-center justify-center rounded-full active:bg-gray-100" style="border:none;cursor:pointer;">&times;</button>
+    </div>
+    <div class="modal-body-scroll px-5 py-4 pb-10">
+      <p class="section-label">Boiler No.</p>
+      <select id="sb-inp-boiler" class="w-full px-4 py-3 border-2 border-gray-200 rounded-2xl text-base outline-none bg-gray-50 font-bold mb-4"></select>
+
+      <p class="section-label">Tanggal Boiler Off</p>
+      <input type="date" id="sb-inp-off" class="w-full px-4 py-3 border-2 border-gray-200 rounded-2xl text-base outline-none bg-gray-50 font-bold mb-4">
+
+      <p class="section-label">Tanggal Pembersihan Abu</p>
+      <input type="date" id="sb-inp-abu" class="w-full px-4 py-3 border-2 border-gray-200 rounded-2xl text-base outline-none bg-gray-50 font-bold mb-2">
+      <div class="mb-4"></div>
+
+      <p class="section-label">📷 Foto Pembersihan Abu (wajib 3 area)</p>
+      <div id="sb-photos-grid" class="grid grid-cols-3 gap-2 mb-4"></div>
+      <p class="section-label">Foto Tambahan (opsional)</p>
+      <div id="sb-extra-grid" class="grid grid-cols-3 gap-2 mb-2"></div>
+      <button onclick="sbPick('extra')" class="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl text-xs font-bold" style="border:1.5px dashed var(--border-strong);color:var(--primary-dark);background:var(--primary-light);cursor:pointer;">
+        <i class="fa-solid fa-plus"></i> Tambah Foto
+      </button>
+      <input type="file" id="sb-photo-input" accept="image/*" style="display:none" onchange="sbAddPhoto(this)">
+
+      <button id="sb-submit-btn" onclick="submitStandby()" class="btn-primary-green w-full mt-5 flex items-center justify-center gap-2">
+        <i class="fa-solid fa-cloud-arrow-up"></i> Save
+      </button>
+    </div>
+  </div>
+</div>
+
 <!-- ===== MODAL SUKSES UPLOAD ===== -->
 <div id="modal-upload-success" class="modal-bs">
   <div class="modal-overlay" onclick="closeUploadSuccessModal()"></div>
@@ -3345,6 +3398,248 @@ function hlShowDownloadModal(fileId, fileName){
   document.body.insertAdjacentHTML('beforeend', html);
 }
 
+/* ═══════════════════════════════════════
+   BOILER STANDBY — form bulanan
+   ═══════════════════════════════════════ */
+var STANDBY_UNITS_JS = ['LIBM','SKMM','SRUM','SMLM','HNAM','PRDM','BPMM','JLYM','SSMM'];
+var sbData = null, sbReq = {furnace:'',pass2:'',pass3:''}, sbExtra = [], sbTarget = 'extra';
+var SB_AREAS = [{k:'furnace',l:'Furnace'},{k:'pass2',l:'Pass 2'},{k:'pass3',l:'Pass 3'}];
+
+function isStandbyUnitJs(unit){
+  return STANDBY_UNITS_JS.indexOf(String(unit||'').trim().toUpperCase()) !== -1;
+}
+
+function loadStandbyStatus(unit){
+  var el = document.getElementById('standby-card-area');
+  if(!el) return;
+  if(!isStandbyUnitJs(unit)){ el.style.display='none'; el.innerHTML=''; return; }
+  google.script.run
+    .withSuccessHandler(function(res){ sbData = res; renderStandbyCard(); })
+    .withFailureHandler(function(){ sbData = null; })
+    .getStandbyStatus(unit);
+}
+
+function renderStandbyCard(){
+  var el = document.getElementById('standby-card-area');
+  if(!el) return;
+  if(!sbData || !sbData.eligible){ el.style.display='none'; el.innerHTML=''; return; }
+  if(sbData.status==='hidden'){ el.style.display='none'; el.innerHTML=''; return; }
+  el.style.display='block';
+
+  var st = sbData.status;
+  var cls = st==='late' ? 'late' : st==='due' ? 'due' : '';
+  var icon = st==='late' ? '🚨' : st==='due' ? '⏰' : '✅';
+  var titleColor = st==='late' ? '#b91c1c' : st==='due' ? '#b45309' : '#005f92';
+  var title, sub;
+
+  if(st==='ok'){
+    title = 'Form Boiler Standby — Sudah Diisi';
+    sub = 'Terima kasih, data sudah tersimpan. Notifikasi ini hilang besok dan muncul lagi tanggal ' + fmtDate(sbData.nextReset) + ' jika belum diisi.';
+  } else if(st==='due'){
+    title = 'Form Boiler Standby Belum Diisi';
+    sub = 'Siklus baru sejak ' + fmtDate(sbData.cycleStart) + '. Segera isi data boiler standby bulan ini.';
+  } else {
+    title = 'Form Boiler Standby Terlambat!';
+    sub = (sbData.daysSince===null ? 'Belum pernah diisi.' : 'Terakhir diisi ' + sbData.daysSince + ' hari lalu (lebih dari 1 bulan).') + ' Segera lengkapi.';
+  }
+
+  var itemsHtml = '';
+  if(st==='ok'){
+    itemsHtml = '<div style="margin-top:10px;">' + sbData.items.map(function(it){
+      var warn = '';
+      return '<div style="padding:8px 0;border-top:1px solid var(--border);font-size:12px;color:#374151;">' +
+        '<b>Boiler ' + lcEsc(it.boiler) + '</b>' + warn +
+        '<div style="color:#6b7280;margin-top:2px;">Off ' + fmtDate(it.tglOff) + ' · Abu ' + fmtDate(it.tglAbu) + ' · ' + it.fotos.length + ' foto</div>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
+
+  el.innerHTML =
+    '<div class="sb-card ' + cls + '">' +
+      '<div style="display:flex;align-items:flex-start;gap:10px;">' +
+        '<span style="font-size:22px;flex-shrink:0;">' + icon + '</span>' +
+        '<div style="flex:1;min-width:0;">' +
+          '<p style="font-size:13px;font-weight:800;color:' + titleColor + ';margin:0;">' + title + '</p>' +
+          '<p style="font-size:11.5px;color:#6b7280;margin:3px 0 0;line-height:1.5;">' + sub + '</p>' +
+        '</div>' +
+      '</div>' +
+      itemsHtml +
+      '<button class="sb-btn" onclick="openStandbyForm()"><i class="fa-solid fa-pen-to-square"></i> ' + (st==='ok' ? 'Tambah Isian Boiler Lain' : 'Isi Form Sekarang') + '</button>' +
+    '</div>';
+}
+
+function openStandbyForm(){
+  sbReq = {furnace:'',pass2:'',pass3:''}; sbExtra = [];
+  document.getElementById('sb-form-unit').textContent = userData ? userData.unit : '—';
+  var opts = (sbData && sbData.boilerOpts) || ['1','2','3','3A','5','6'];
+  document.getElementById('sb-inp-boiler').innerHTML =
+    '<option value="">— Pilih Boiler —</option>' +
+    opts.map(function(o){ return '<option value="'+o+'">Boiler '+o+'</option>'; }).join('');
+  document.getElementById('sb-inp-off').value = '';
+  document.getElementById('sb-inp-abu').value = '';
+  var btn = document.getElementById('sb-submit-btn');
+  btn.disabled = false;
+  btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Save';
+  renderSbPhotos();
+  document.getElementById('modal-standby').classList.add('open');
+}
+function closeStandbyForm(){
+  document.getElementById('modal-standby').classList.remove('open');
+  sbReq = {furnace:'',pass2:'',pass3:''}; sbExtra = [];
+}
+
+function sbPick(target){
+  sbTarget = target;
+  document.getElementById('sb-photo-input').click();
+}
+
+function sbAddPhoto(input){
+  var file = input.files && input.files[0];
+  if(!file) return;
+  showToast('Loading foto...', 1500);
+  resizeImageToDataUrl(file, 1280, 0.75, function(dataUrl){
+    if(sbTarget === 'extra') sbExtra.push(dataUrl);
+    else sbReq[sbTarget] = dataUrl;
+    renderSbPhotos();
+    input.value = '';
+  }, function(){
+    showToast('⚠️ Foto gagal dimuat, coba lagi.', 3000);
+    input.value = '';
+  });
+}
+function sbRemoveReq(k){ sbReq[k] = ''; renderSbPhotos(); }
+function sbRemoveExtra(i){ sbExtra.splice(i,1); renderSbPhotos(); }
+
+function renderSbPhotos(){
+  var grid = document.getElementById('sb-photos-grid');
+  if(grid){
+    grid.innerHTML = SB_AREAS.map(function(a){
+      var src = sbReq[a.k];
+      if(src){
+        return '<div><div class="ba-doc-photo-box"><img src="'+src+'"><div class="rm" onclick="sbRemoveReq(\''+a.k+'\')">✕</div></div>' +
+          '<p style="font-size:11px;font-weight:700;text-align:center;margin:4px 0 0;color:#005f92;">'+a.l+'</p></div>';
+      }
+      return '<div><div class="ba-doc-photo-box" style="border-color:#ef4444;background:#fef2f2;color:#dc2626;font-weight:700;" onclick="sbPick(\''+a.k+'\')">📷 Wajib</div>' +
+        '<p style="font-size:11px;font-weight:700;text-align:center;margin:4px 0 0;color:#dc2626;">'+a.l+'</p></div>';
+    }).join('');
+  }
+  var eg = document.getElementById('sb-extra-grid');
+  if(eg){
+    eg.innerHTML = sbExtra.map(function(src, idx){
+      return '<div class="ba-doc-photo-box"><img src="'+src+'"><div class="rm" onclick="sbRemoveExtra('+idx+')">✕</div></div>';
+    }).join('');
+  }
+}
+
+function submitStandby(){
+  var boiler = document.getElementById('sb-inp-boiler').value;
+  var off    = document.getElementById('sb-inp-off').value;
+  var abu    = document.getElementById('sb-inp-abu').value;
+
+  if(!boiler){ showToast('⚠️ Pilih Boiler No. terlebih dahulu'); return; }
+  if(!off){ showToast('⚠️ Isi tanggal boiler off'); return; }
+  if(!abu){ showToast('⚠️ Isi tanggal pembersihan abu'); return; }
+  if(new Date(abu) < new Date(off)){ showToast('⚠️ Tanggal abu tidak boleh sebelum tanggal off', 3500); return; }
+  for(var i=0;i<SB_AREAS.length;i++){
+    if(!sbReq[SB_AREAS[i].k]){ showToast('⚠️ Foto ' + SB_AREAS[i].l + ' wajib diisi', 3500); return; }
+  }
+
+  var fotos = SB_AREAS.map(function(a){ return { label:a.l, data:sbReq[a.k] }; });
+  sbExtra.forEach(function(src, n){ fotos.push({ label:'Tambahan ' + (n+1), data:src }); });
+
+  var btn = document.getElementById('sb-submit-btn');
+  btn.disabled = true;
+  btn.innerHTML = '<span class="spinner spinner-white"></span>&nbsp;Uploading...';
+
+  google.script.run
+    .withSuccessHandler(function(res){
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Save';
+      if(res && res.success){
+        closeStandbyForm();
+        showToast('✅ Form boiler standby tersimpan', 3500);
+        loadStandbyStatus(userData.unit);
+      } else {
+        showToast('❌ Gagal: ' + (res && res.message ? res.message : 'Coba lagi'), 4500);
+      }
+    })
+    .withFailureHandler(function(err){
+      btn.disabled = false;
+      btn.innerHTML = '<i class="fa-solid fa-cloud-arrow-up"></i> Save';
+      showToast('❌ Error: ' + (err.message || 'Gagal terhubung ke server'), 4500);
+    })
+    .submitBoilerStandby(JSON.stringify({
+      pabrik: userData.unit, boiler: boiler, tglOff: off, tglAbu: abu,
+      fotos: fotos, uploaderEmail: userData.email, uploaderName: userData.name
+    }));
+}
+
+/* ── HO: rekap list boiler standby ── */
+var _hoStandbyCache = null;
+
+function renderHOStandby(res){
+  var sec = document.getElementById('ho-standby-section');
+  if(!sec) return;
+  var head = '<p class="section-label" style="margin-bottom:10px;">Rekap Boiler Standby — Semua Unit</p>';
+
+  if(!res || res.status !== 'success'){
+    sec.innerHTML = head + '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
+    return;
+  }
+
+  var rows = res.rows || [], belum = res.belum || [];
+
+  var belumHtml = belum.length
+    ? '<div style="background:#fef2f2;border:1px solid #fecaca;border-radius:12px;padding:10px 12px;margin-bottom:12px;">' +
+        '<p style="font-size:12px;font-weight:800;color:#b91c1c;margin:0 0 6px;">⏰ Belum mengisi siklus ini (sejak ' + fmtDate(res.cycleStart) + ') · ' + belum.length + ' unit</p>' +
+        '<div style="display:flex;flex-wrap:wrap;gap:6px;">' + belum.map(function(u){
+          return '<span class="badge b-red">' + u + '</span>';
+        }).join('') + '</div>' +
+      '</div>'
+    : '<div class="alert-info" style="margin:0 0 12px;">✅ Semua unit standby sudah mengisi siklus ini.</div>';
+
+  var body;
+  if(!rows.length){
+    body = '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:16px 0;">Belum ada isian.</p>';
+  } else {
+    var th = 'padding:8px;font-size:10px;font-weight:700;color:#64748b;text-transform:uppercase;letter-spacing:.05em;';
+    var trs = rows.map(function(r){
+      var fotoHtml = r.fotos.map(function(f){
+        return '<a href="'+f.url+'" target="_blank" style="display:inline-block;color:#0077B6;font-weight:700;text-decoration:none;margin:0 8px 2px 0;">📷 '+lcEsc(f.label)+'</a>';
+      }).join('');
+      var sel = r.selisih===null ? '—' : r.selisih + ' hr';
+      return '<tr class="hm-searchable-row ' + (r.over ? 'sb-over' : '') + '" style="border-bottom:1px solid var(--border);">' +
+        '<td style="padding:9px 8px;font-size:12.5px;font-weight:700;">' + lcEsc(r.unit) + '</td>' +
+        '<td style="padding:9px 8px;font-size:12px;text-align:center;">' + lcEsc(r.boiler) + '</td>' +
+        '<td style="padding:9px 8px;font-size:12px;white-space:nowrap;">' + fmtDate(r.tglOff) + '</td>' +
+        '<td style="padding:9px 8px;font-size:12px;white-space:nowrap;">' + fmtDate(r.tglAbu) + '</td>' +
+        '<td style="padding:9px 8px;font-size:12px;text-align:center;font-weight:800;">' + sel + '</td>' +
+        '<td style="padding:9px 8px;font-size:12px;white-space:nowrap;">' + fotoHtml + '</td>' +
+        '<td style="padding:9px 8px;font-size:11px;color:#64748b;">' + lcEsc(r.uploader) + '<br>' + r.timestamp + '</td>' +
+      '</tr>';
+    }).join('');
+
+    body =
+      '<p style="font-size:11px;color:#94a3b8;margin:0 0 8px;">Baris merah = selisih boiler off → pembersihan abu lebih dari ' + res.maxSelisih + ' hari (' + res.totalOver + ' data)</p>' +
+      hmSearchBarHtml('ho-standby-list', 'Cari unit / boiler...') +
+      '<div id="ho-standby-list" style="overflow-x:auto;-webkit-overflow-scrolling:touch;">' +
+        '<table style="width:100%;border-collapse:collapse;min-width:640px;">' +
+          '<thead><tr style="background:#f0f8ff;">' +
+            '<th style="'+th+'text-align:left;">Unit</th>' +
+            '<th style="'+th+'">Boiler</th>' +
+            '<th style="'+th+'text-align:left;">Boiler Off</th>' +
+            '<th style="'+th+'text-align:left;">Bersih Abu</th>' +
+            '<th style="'+th+'">Selisih</th>' +
+            '<th style="'+th+'text-align:left;">Foto</th>' +
+            '<th style="'+th+'text-align:left;">Diisi Oleh</th>' +
+          '</tr></thead><tbody>' + trs + '</tbody>' +
+        '</table>' +
+      '</div>';
+  }
+
+  sec.innerHTML = head + belumHtml + body;
+}
+
 function showToast(msg,dur){
   dur=dur||2800;
   var t=document.getElementById('toast');
@@ -3511,6 +3806,7 @@ function loadData(unit, silent){
   loadWtpZmd(unit);
   loadHMInspeksi(unit);
   loadWtpExt(unit);
+  loadStandbyStatus(unit);
   // loadOperasional(unit);   // ⛔ OPERASIONAL BOILER — disembunyikan sementara (poin 4)
     google.script.run
     .withSuccessHandler(function(data){ utilitasData=data; renderUtilitasCard(); })
@@ -7781,6 +8077,7 @@ function loadDataHO(forceRefresh) {
     if (_hoUtilCache)   renderHOUtilitasDonut(_hoUtilCache);
     if (_hoBreakdownGroupCache) renderHOBreakdownGroupChart(_hoBreakdownGroupCache);
     if (_hoHMCache) renderHOHMDonut(_hoHMCache);
+    if (_hoStandbyCache) renderHOStandby(_hoStandbyCache);
     return; // langsung tampil dari cache, tanpa loading
   }
 
@@ -7832,6 +8129,11 @@ function loadDataHO(forceRefresh) {
         .withSuccessHandler(function(d){ _hoHMCache = d; renderHOHMDonut(d); })
         .withFailureHandler(function() {})
         .getHMInspeksiSummaryHO();
+
+      google.script.run
+        .withSuccessHandler(function(d){ _hoStandbyCache = d; renderHOStandby(d); })
+        .withFailureHandler(function() {})
+        .getStandbySummaryHO();
 
       google.script.run
         .withSuccessHandler(function(d){ _hoBreakdownGroupCache = d; renderHOBreakdownGroupChart(d); })
@@ -7954,6 +8256,13 @@ function renderHODashboard(res) {
   html +=
     '<div class="ho-assess-wrap" id="ho-assess-section">' +
     '<p class="section-label" style="margin-bottom:10px;">Assessment SOP & IK — Semua Unit</p>' +
+    '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
+    '</div>';
+
+  // ── BOILER STANDBY REKAP placeholder ──────────────────────────
+  html +=
+    '<div class="ho-assess-wrap" id="ho-standby-section">' +
+    '<p class="section-label" style="margin-bottom:10px;">Rekap Boiler Standby — Semua Unit</p>' +
     '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
     '</div>';
 
