@@ -8078,15 +8078,6 @@ async function downloadHeatlossTemplate(){
       }
     }
 
-    var noteRow = HLT.firstDataRow + HEATLOSS_FORM_ROWS.length + 1;
-    ws.mergeCells(noteRow,1,noteRow,7);
-    ws.getCell(noteRow,1).value =
-      'Petunjuk: (1) isi kotak kuning B2:B5. (2) Foto Original & Thermal WAJIB berupa gambar yang ditempel di kolom D & E untuk titik 1–' + photoLastNo +
-      ' (sampai ' + HLT.photoUntilArea + '), gunakan Insert > Pictures > Place Over Cells. (3) Titik setelahnya (kolom abu-abu) tidak perlu foto. (4) Jangan ubah judul, header, Area & Posisi.';
-    ws.getCell(noteRow,1).font = {italic:true,color:{argb:'FF64748B'},size:10};
-    ws.getCell(noteRow,1).alignment = {wrapText:true,vertical:'top'};
-    ws.getRow(noteRow).height = 44;
-
     var buf = await wb.xlsx.writeBuffer();
 
     // ArrayBuffer/Uint8Array → base64 (dipotong per blok agar aman untuk memori WebView)
@@ -13737,6 +13728,116 @@ function openHOEfisiensiYear(year){
   hxModal('ho-ef-year-modal', 'Efisiensi Boiler ' + year, list.length + ' boiler diuji',
     '<div style="padding-top:12px;">' + info + hmSearchBarHtml('ho-ef-year-list', 'Cari unit / boiler...') +
     '<div id="ho-ef-year-list" style="padding-bottom:30px;">' + rows + '</div></div>');
+}
+
+/* ═══════════════════════════════════════════════════════════
+   KARTU BANNER: Breakdown <-> Efisiensi (flip 3D)
+   ═══════════════════════════════════════════════════════════ */
+(function(){
+  var st = document.createElement('style');
+  st.textContent =
+    '.uc-wrap{display:grid;perspective:600px;width:116px;margin-left:auto;}' +
+    '.uc-slide{grid-area:1/1;text-align:right;cursor:pointer;backface-visibility:hidden;transform-origin:50% 50%;' +
+      'transition:transform 1.2s cubic-bezier(.4,.2,.2,1),opacity .9s ease;opacity:0;transform:rotateX(-90deg);pointer-events:none;}' +
+    '.uc-slide.on{opacity:1;transform:rotateX(0);pointer-events:auto;}' +
+    '.uc-dots{display:flex;justify-content:flex-end;gap:4px;margin-top:6px;}' +
+    '.uc-dots i{width:5px;height:5px;border-radius:50%;background:rgba(255,255,255,.3);transition:all .3s;animation:none!important;}' +
+    '.uc-dots i.on{width:14px;border-radius:3px;background:#48cae4;}' +
+    '.uc-l{font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.6;margin:0 0 2px;}' +
+    '.uc-v{font-size:22px;font-weight:800;line-height:1;margin:0;}' +
+    '.uc-m{font-size:9px;margin-top:3px;opacity:.55;}' +
+    '.uc-ln{font-size:12px;font-weight:800;line-height:1.5;color:#caf0f8;}' +
+    '.uc-ln span{font-weight:600;opacity:.65;margin-right:5px;font-size:10px;}';
+  document.head.appendChild(st);
+})();
+
+var _ucTimer = null, _ucIdx = 0;
+
+/* prefetch efisiensi: setelah data datang, kartu banner ikut diperbarui */
+efPrefetch = function(unit){
+  if(!unit || _efLoading) return;
+  _efLoading = true;
+  google.script.run
+    .withSuccessHandler(function(res){
+      _efLoading = false;
+      _efCache = res; _efCacheUnit = unit; _efCacheTime = Date.now();
+      efData = res;
+      if(document.getElementById('ef-body')) renderEfisiensi();
+      renderUtilitasCard();
+    })
+    .withFailureHandler(function(err){
+      _efLoading = false;
+      var el = document.getElementById('ef-body');
+      if(el) el.innerHTML = '<div class="ef-card"><div class="ef-none">❌ Gagal memuat data: ' + lcEsc(err.message || '') + '</div></div>';
+    })
+    .getEfisiensiBoiler(unit);
+};
+
+function ucEfisiensiSlide(){
+  if(!userData || !_efCache || _efCacheUnit !== userData.unit) return '';
+  var d = _efCache;
+  if(d.status !== 'success' || !d.groups || !d.groups.length) return '';
+  var yr = 0;
+  d.groups.forEach(function(g){
+    (d.years || []).forEach(function(y){ if(g.data[y] != null && y > yr) yr = y; });
+  });
+  if(!yr) return '';
+  var list = d.groups.filter(function(g){ return g.data[yr] != null; });
+  if(!list.length) return '';
+
+  var body;
+  if(list.length === 1){
+    body = '<p class="uc-v" style="color:#caf0f8;font-size:32px;line-height:1.05;">' + list[0].data[yr].toFixed(1) + '%</p>' +
+           (list[0].boiler ? '<p class="uc-m">' + lcEsc(boilerLabelFix(userData.unit, list[0].boiler)) + '</p>' : '');
+  } else {
+    body = list.slice(0, 3).map(function(g){
+      return '<div class="uc-ln"><span>' + lcEsc(boilerNoFix(userData.unit, g.boiler) || '-') + '</span>' + g.data[yr].toFixed(1) + '%</div>';
+    }).join('');
+  }
+  return '<div class="uc-slide" onclick="openEfisiensiPage()">' +
+    '<p class="uc-l">Efisiensi · ' + yr + '</p>' + body + '</div>';
+}
+
+function ucBreakdownSlide(){
+  if(!utilitasData || (!utilitasData.pct && utilitasData.pct !== 0)) return '';
+  var isLow = utilitasData.pct < 95;
+  var pctColor = isLow ? '#fca5a5' : '#a7f3d0';
+  return '<div class="uc-slide" onclick="openUtilitasModal()">' +
+    '<p class="uc-l">Jam Olah · ' + utilitasData.bulan + '</p>' +
+    '<p class="uc-v" style="color:' + pctColor + ';">' + utilitasData.pct.toFixed(1) + '%</p>' +
+    (isLow ? '<p class="uc-m" style="color:#fca5a5;opacity:1;font-weight:700;">⚠ Di bawah target</p>'
+           : '') +
+    '</div>';
+}
+
+function renderUtilitasCard(){
+  var el = document.getElementById('utilitas-card');
+  if(!el) return;
+  clearInterval(_ucTimer); _ucTimer = null;
+
+  var slides = ucBreakdownSlide() + ucEfisiensiSlide();
+  var n = (slides.match(/uc-slide"/g) || []).length;
+  if(!n){ el.classList.add('hidden'); el.innerHTML = ''; return; }
+
+  el.removeAttribute('onclick');
+  el.onclick = null;
+  el.classList.remove('hidden');
+  el.innerHTML = '<div class="uc-wrap">' + slides + '</div>';
+
+  var sl = el.querySelectorAll('.uc-slide'), dots = el.querySelectorAll('.uc-dots i');
+  if(_ucIdx >= n) _ucIdx = 0;
+  function show(i){
+    sl.forEach(function(s, k){ s.classList.toggle('on', k === i); });
+    dots.forEach(function(d, k){ d.classList.toggle('on', k === i); });
+  }
+  show(_ucIdx);
+  if(n > 1){
+    _ucTimer = setInterval(function(){
+      if(!el.offsetParent) return;
+      _ucIdx = (_ucIdx + 1) % n;
+      show(_ucIdx);
+    }, 4200);
+  }
 }
 
 function evShowPlayerDetail(nama, rankIdx) {
