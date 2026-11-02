@@ -8,7 +8,10 @@
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="Boiler Pro">
 <meta name="theme-color" content="#0077B6">
-<link rel="icon" type="image/png" href="favicon.png">
+<link rel="icon" href="favicon.ico" sizes="any">
+<link rel="icon" type="image/png" sizes="16x16" href="favicon-16.png">
+<link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icon-192.png">
 <link rel="apple-touch-icon" href="favicon.png">
 <link rel="shortcut icon" href="favicon.png">
 <link href="https://fonts.googleapis.com/css2?family=Miriam+Libre:wght@400;700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -1863,11 +1866,11 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
 .mp-eyebrow{display:none;}
 
 /* ═══ Titik notifikasi merah ═══ */
-.nd{position:absolute;top:3px;right:3px;width:13px;height:13px;border-radius:50%;background:#ef4444;border:2px solid #fff;z-index:4;animation:ndPulse 1.6s ease-out infinite;}
+.nd{position:absolute;top:0;right:0;min-width:20px;height:20px;padding:0 5px;box-sizing:border-box;border-radius:10px;background:#ef4444;border:2px solid #fff;color:#fff;font-size:10px;font-weight:800;line-height:16px;text-align:center;font-family:'Plus Jakarta Sans',sans-serif;z-index:4;animation:ndPulse 1.6s ease-out infinite;}
 @keyframes ndPulse{0%{box-shadow:0 0 0 0 rgba(239,68,68,.55)}100%{box-shadow:0 0 0 9px rgba(239,68,68,0)}}
 .nav4 .nav-btn .nv-ico{position:relative;}
-.nv-ico .nd{top:0;right:4px;width:11px;height:11px;}
-.lc-as2-ico .nd{top:4px;right:4px;}
+.nv-ico .nd{top:-5px;right:-2px;min-width:17px;height:17px;line-height:13px;font-size:9px;}
+.lc-as2-ico .nd{top:2px;right:2px;}
 
 /* ═══ Performance Boiler ═══ */
 .pb-alert{margin:0 16px 14px;display:flex;align-items:center;gap:12px;padding:14px;border-radius:20px;background:linear-gradient(135deg,#fef2f2,#fff);border:1px solid #fecaca;border-left:5px solid #ef4444;box-shadow:0 6px 18px rgba(239,68,68,.1);}
@@ -2208,6 +2211,10 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
         <h2 id="greet" class="font-extrabold text-2xl text-gray-900">Selamat Datang,</h2>
       </div>
       <div class="app-header-right">
+        <button onclick="openNotifModal()" class="logout-btn-header" title="Notifikasi" style="position:relative;">
+          <i class="fa-solid fa-bell" style="color:#0077B6;"></i>
+          <span id="notif-bell-n" style="position:absolute;top:-4px;right:-4px;"></span>
+        </button>
         <button onclick="doLogout()" class="logout-btn-header" title="Keluar">
           <i class="fa-solid fa-right-from-bracket"></i>
         </button>
@@ -3594,22 +3601,75 @@ var NAV_ITEMS = [
 ];
 var _navActive = 'status';
 
-function boilerIssues(){
-  var s = mpBoilerStatus(), hx = userData && isHeatlossExcludedUnit(userData.unit);
-  return { riksa:Math.max(s.riksa,0), heat:hx?0:Math.max(s.heat,0), sim:Math.max(s.sim,0), perf:pbNeed()?1:0 };
+function ndBadge(n){ return n > 0 ? '<span class="nd">' + (n > 9 ? '9+' : n) + '</span>' : ''; }
+
+/* ═══ NOTIFIKASI (sumber: server → getNotifikasiUnit) ═══ */
+var notifData = null, _notifTimer = null;
+
+function notifCount(kat){ return (notifData && notifData.perKategori) ? (notifData.perKategori[kat] || 0) : 0; }
+function notifWtpCount(kind){
+  if(!notifData || !notifData.items) return 0;
+  var pre = (kind === 'int') ? 'WTP Internal' : 'WTP Eksternal';
+  return notifData.items.filter(function(i){ return i.kategori === 'wtp' && i.judul.indexOf(pre) === 0; }).length;
 }
-function navDot(key){
-  if(!userData) return false;
-  if(key === 'boiler'){ var b = boilerIssues(); return b.riksa>0 || b.heat>0 || b.sim>0 || b.perf>0; }
-  if(key === 'wtp'){ var a = wtpTileInfo('int'), c = wtpTileInfo('ext'); return !!((a && a.bad) || (c && c.bad)); }
-  return false;
+function navCount(key){
+  if(!userData || !notifData) return 0;
+  if(key === 'boiler') return notifCount('simulasi') + notifCount('heatloss') + notifCount('riksa') + notifCount('performance');
+  if(key === 'wtp') return notifCount('wtp');
+  return 0;
+}
+function notifRefreshSoon(){
+  if(!userData) return;
+  clearTimeout(_notifTimer);
+  _notifTimer = setTimeout(function(){
+    google.script.run
+      .withSuccessHandler(function(r){
+        notifData = (r && r.status === 'success') ? r : null;
+        refreshNavDots(); renderNotifBell();
+      })
+      .withFailureHandler(function(){})
+      .getNotifikasiUnit(userData.unit);
+  }, 800);
+}
+function renderNotifBell(){
+  var el = document.getElementById('notif-bell-n');
+  if(el) el.innerHTML = ndBadge(notifData ? notifData.total : 0);
+}
+
+var NOTIF_UI = {
+  simulasi   : { ic:'⚠️', go:"menuGo('simulasi')" },
+  heatloss   : { ic:'🌡️', go:"menuGo('heatloss')" },
+  riksa      : { ic:'📋', go:"menuGo('riksa')" },
+  wtp        : { ic:'💧', go:"openWtpHub()" },
+  performance: { ic:'📈', go:"openPerformancePage()" }
+};
+var NOTIF_COL = { expired:'#dc2626', perhatian:'#d97706', belum:'#64748b', diluar_standard:'#ea580c' };
+
+function openNotifModal(){
+  var items = (notifData && notifData.items) || [];
+  var body;
+  if(!items.length){
+    body = '<div style="padding:40px 20px;text-align:center;color:#0077B6;font-weight:700;font-size:14px;">✅ Tidak ada notifikasi. Semua aman.</div>';
+  } else {
+    body = '<div style="background:#e6f6ff;padding:14px 12px 30px;">' + items.map(function(it){
+      var ui = NOTIF_UI[it.kategori] || { ic:'🔔', go:'' };
+      var col = NOTIF_COL[it.status] || '#64748b';
+      return '<div onclick="document.getElementById(\'notif-modal\').remove();' + ui.go + '" ' +
+        'style="max-width:92%;background:#fff;border-radius:4px 16px 16px 16px;padding:10px 13px;margin-bottom:10px;' +
+        'border-left:4px solid ' + col + ';box-shadow:0 1px 2px rgba(0,0,0,.1);cursor:pointer;">' +
+        '<div style="font-size:13px;font-weight:800;color:#03045e;">' + ui.ic + ' ' + lcEsc(it.judul) + '</div>' +
+        '<div style="font-size:12px;color:#475569;margin-top:3px;line-height:1.5;">' + lcEsc(it.detail) + '</div>' +
+      '</div>';
+    }).join('') + '</div>';
+  }
+  hxModal('notif-modal', 'Notifikasi', items.length + ' pesan', body);
 }
 function renderMainNav(active){
   _navActive = active;
   document.querySelectorAll('nav[data-nav="main"]').forEach(function(nav){
     nav.innerHTML = NAV_ITEMS.map(function(it){
       return '<button class="nav-btn' + (it.key===active?' active':'') + '" onclick="navTo(\'' + it.key + '\')">' +
-        '<span class="nv-ico">' + NAV_ICONS[it.ico] + (navDot(it.key) ? '<span class="nd"></span>' : '') + '</span><p class="text-[10px]">' + it.label + '</p></button>';
+        '<span class="nv-ico">' + NAV_ICONS[it.ico] + ndBadge(navCount(it.key)) + '</span><p class="text-[10px]">' + it.label + '</p></button>';
     }).join('');
   });
 }
@@ -4036,7 +4096,7 @@ function doLogout(){
   _appCacheTime=0;_riksaCacheTime=0;_hoCacheTime=0;
   _hoWtpCache=null;_hoAssessCache=null;_hoUtilCache=null;
   _lcLoaded=false;
-  wtpData=null; pbData=null; pbTime=0;
+  wtpData=null; pbData=null; pbTime=0; notifData=null;
   document.getElementById('chatFAB').classList.remove('show');
 var _wn=document.getElementById('wtp-notif-area'); if(_wn){_wn.innerHTML='';_wn.style.display='none';}
   document.getElementById('aiChatWidget').classList.remove('visible');
@@ -4128,6 +4188,7 @@ function loadData(unit, silent){
   loadWtpExt(unit);
   loadStandbyStatus(unit);
   loadEfisiensiPrefetch(unit);
+  notifRefreshSoon();
   // loadOperasional(unit);   // ⛔ OPERASIONAL BOILER — disembunyikan sementara (poin 4)
     google.script.run
     .withSuccessHandler(function(data){ utilitasData=data; renderUtilitasCard(); })
@@ -5486,7 +5547,7 @@ function openMenuPage(cfg){
   closeMenuPages();
   var items = cfg.items.map(function(it, i){
     return '<div class="lc-as2 ' + it.cls + '" style="animation-delay:' + (i * 70) + 'ms" onclick="' + it.on + '">' +
-      '<div class="lc-as2-ico">' + it.svg + (it.dot ? '<span class="nd"></span>' : '') + '</div>' +
+      '<div class="lc-as2-ico">' + it.svg + ndBadge(it.dot) + '</div>' +
       '<div class="lc-as2-t">' + it.t + '</div>' +
       '<span class="lc-as2-p">' + it.p + '</span>' +
     '</div>';
@@ -5582,8 +5643,8 @@ function openWtpHub(){
     eyebrow:'Kualitas Air', title:'WTP · ' + userData.unit,
     sub:'',
     items:[
-      { cls:pi.cls, svg:MP_ICO.wtpInt, t:'Internal Treatment', p:pi.p, on:"openWtpPanel('int')" },
-      { cls:pe.cls, svg:MP_ICO.wtpExt, t:'External Treatment', p:pe.p, on:"openWtpPanel('ext')" },
+      { cls:pi.cls, svg:MP_ICO.wtpInt, t:'Internal Treatment', p:pi.p, dot:(ti&&ti.bad)?1:0, on:"wtpGo('int')" },
+      { cls:pe.cls, svg:MP_ICO.wtpExt, t:'External Treatment', p:pe.p, dot:(te&&te.bad)?1:0, on:"wtpGo('ext')" },
       { cls:'soon',  svg:MP_ICO.vendor, t:'Vendor', p:'Segera Hadir', on:"showToast('Menu Vendor sedang dalam pengembangan 🚧')" }
     ]
   });
@@ -5905,6 +5966,7 @@ function openUtilitasModal(){
 const DK_OK_SVG='<svg class="dk-ic ok" viewBox="0 0 36 36"><circle cx="18" cy="18" r="15"/><path d="M11 18.5l5 5 9-10"/></svg>';
 
 function renderDaruratShift(){
+  notifRefreshSoon();
   var el=document.getElementById('darurat-shift-grid');if(!el)return;
   if(!daruratData){el.innerHTML='<div style="padding:12px;color:#94a3b8;text-align:center;font-size:13px;">Data tidak tersedia</div>';return;}
   var rows='';
@@ -11465,6 +11527,7 @@ function toggleSimReviewBanner() {
 
 function loadPendingReviews() {
   if (!userData) return;
+  notifRefreshSoon();
   var isHO = userData.unit && userData.unit.toUpperCase() === 'HEAD OFFICE';
 
   if (isHO) {
@@ -12456,11 +12519,11 @@ function openBoilerPicker(){
   var hlExcl = isHeatlossExcludedUnit(userData.unit);
   var st = mpBoilerStatus(), pf = pbNeed();
   var pr = mpPill(st.riksa,'Sertifikat'), ph = mpPill(st.heat,'Monitoring'), ps = mpPill(st.sim,'Darurat');
-  var items = [{ cls:pr.cls, svg:MP_ICO.riksa, t:'Riksa Uji', p:pr.p, dot:st.riksa>0, on:"menuGo('riksa')" }];
-  if(!hlExcl) items.push({ cls:ph.cls, svg:MP_ICO.thermal, t:'Heatloss', p:ph.p, dot:st.heat>0, on:"menuGo('heatloss')" });
-  items.push({ cls:ps.cls, svg:MP_ICO.sim, t:'Simulasi Darurat', p:ps.p, dot:st.sim>0, on:"menuGo('simulasi')" });
+  var items = [{ cls:pr.cls, svg:MP_ICO.riksa, t:'Riksa Uji', p:pr.p, dot:notifCount('riksa'), on:"menuGo('riksa')" }];
+  if(!hlExcl) items.push({ cls:ph.cls, svg:MP_ICO.thermal, t:'Heatloss', p:ph.p, dot:notifCount('heatloss'), on:"menuGo('heatloss')" });
+  items.push({ cls:ps.cls, svg:MP_ICO.sim, t:'Simulasi Darurat', p:ps.p, dot:notifCount('simulasi'), on:"menuGo('simulasi')" });
   items.push({ cls:'info', svg:MP_ICO.efisiensi, t:'Efisiensi Boiler', p:'Uji Efisiensi', on:"openEfisiensiPage()" });
-  items.push({ cls:pf?'warn':'info', svg:MP_ICO.performance, t:'Performance Boiler', p:pf?'Belum diisi':'Data Bulanan', dot:pf, on:"openPerformancePage()" });
+  items.push({ cls:pf?'warn':'info', svg:MP_ICO.performance, t:'Performance Boiler', p:pf?'Belum diisi':'Data Bulanan', dot:notifCount('performance'), on:"openPerformancePage()" });
   items.push({ cls:'info', svg:MP_ICO.safety, t:'Safety Valve', p:'Setting Tekanan', on:"openSafetyValvePage()" });
   openMenuPage({ id:'boiler-menu-page', nav:'boiler', eyebrow:'Unit ' + userData.unit, title:'Boiler', sub:'', items:items });
 }
@@ -12569,6 +12632,20 @@ var PB_UM = [
 ];
 
 function pbNeed(){ return !!(pbData && pbData.status === 'success' && !pbData.filled); }
+function pbMissing(){
+  if(!pbData || pbData.status !== 'success') return 0;
+  var ms = pbData.months || [];
+  if(!ms.length) return 1;                       // belum ada data awal: cukup 1 notif
+  var have = {}; ms.forEach(function(m){ have[m.key] = 1; });
+  var p = ms[0].key.split('-'), y = +p[0], m = +p[1], n = 0, t = pbData.target.key;
+  for(var i = 0; i < 240; i++){
+    var k = y + '-' + ('0' + m).slice(-2);
+    if(k > t) break;
+    if(!have[k]) n++;
+    m++; if(m > 12){ m = 1; y++; }
+  }
+  return n;
+}
 function pbSlots(){ return (pbData && pbData.boilers && pbData.boilers.length) ? pbData.boilers : [1,2,3]; }
 function pbFmt(v){ return v == null ? '—' : (Math.round(v * 100) / 100).toLocaleString('id-ID'); }
 function pbSetRange(n){ pbRange = n; renderPerformance(); }
@@ -12578,7 +12655,7 @@ function pbFetch(){
   if(!userData || pbLoading) return;
   pbLoading = true;
   google.script.run
-    .withSuccessHandler(function(res){ pbLoading = false; pbData = res; pbTime = Date.now(); renderPerformance(); refreshNavDots(); })
+    .withSuccessHandler(function(res){ pbLoading = false; pbData = res; pbTime = Date.now(); renderPerformance(); refreshNavDots(); notifRefreshSoon(); })
     .withFailureHandler(function(err){ pbLoading = false; if(!pbData) pbData = { status:'error', message:err.message }; renderPerformance(); })
     .getPerformanceData(userData.unit);
 }
@@ -12860,8 +12937,8 @@ function openWtpHub(){
     id:'wtp-hub-page', nav:'wtp',
     eyebrow:'', title:'WTP', sub:'',
     items:[
-      { cls:pi.cls, svg:MP_ICO.wtpInt, t:'Internal Treatment', p:pi.p, dot:pi.cls==='warn', on:"wtpGo('int')" },
-      { cls:pe.cls, svg:MP_ICO.wtpExt, t:'External Treatment', p:pe.p, dot:pe.cls==='warn', on:"wtpGo('ext')" },
+      { cls:pi.cls, svg:MP_ICO.wtpInt, t:'Internal Treatment', p:pi.p, dot:notifWtpCount('int'), on:"wtpGo('int')" },
+      { cls:pe.cls, svg:MP_ICO.wtpExt, t:'External Treatment', p:pe.p, dot:notifWtpCount('ext'), on:"wtpGo('ext')" },
       { cls:'soon', svg:MP_ICO.vendor, t:'Vendor', p:'Segera Hadir', on:"openVendorPage()" }
     ]
   });
