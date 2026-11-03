@@ -279,6 +279,25 @@
   max-width:min(92vw,420px);line-height:1.5;text-align:left;
 }
 
+  /* ── Toast review dokumen HO (di bawah header) ── */
+  #ho-review-toast{
+    position:sticky;top:68px;z-index:49;
+    margin:10px 16px 0;
+    display:none;align-items:center;gap:10px;
+    padding:12px 14px;border-radius:16px;
+    background:linear-gradient(135deg,#fffbeb,#fef3c7);
+    border:1px solid #fde68a;border-left:5px solid #f59e0b;
+    box-shadow:0 8px 24px rgba(245,158,11,.25);
+    cursor:pointer;animation:hoToastIn .45s cubic-bezier(.2,.8,.2,1) both;
+  }
+  #ho-review-toast.show{display:flex;}
+  #ho-review-toast .hrt-ic{width:38px;height:38px;border-radius:12px;background:#f59e0b;color:#fff;display:flex;align-items:center;justify-content:center;font-size:17px;flex-shrink:0;animation:ndPulse 1.6s ease-out infinite;}
+  #ho-review-toast .hrt-tx{flex:1;min-width:0;}
+  #ho-review-toast .hrt-tx b{display:block;font-size:13px;font-weight:800;color:#92400e;line-height:1.3;}
+  #ho-review-toast .hrt-tx small{display:block;font-size:11px;font-weight:600;color:#b45309;margin-top:2px;line-height:1.4;}
+  #ho-review-toast .hrt-x{width:28px;height:28px;border-radius:50%;border:none;background:rgba(180,83,9,.12);color:#92400e;font-size:16px;cursor:pointer;flex-shrink:0;}
+  @keyframes hoToastIn{from{opacity:0;transform:translateY(-14px)}to{opacity:1;transform:none}}
+
   /* ── Badges ── */
   .badge{display:inline-block;font-size:11px;font-weight:700;padding:3px 10px;border-radius:100px;white-space:nowrap;letter-spacing:.02em;}
   .b-green{background:#e0f4ff;color:#005f92;}
@@ -1871,6 +1890,7 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
 .nav4 .nav-btn .nv-ico{position:relative;}
 .nv-ico .nd{top:-5px;right:-2px;min-width:17px;height:17px;line-height:13px;font-size:9px;}
 .lc-as2-ico .nd{top:2px;right:2px;}
+.nd.ok{background:#0077B6;animation:none;}
 
 /* ═══ Performance Boiler ═══ */
 .pb-alert{margin:0 16px 14px;display:flex;align-items:center;gap:12px;padding:14px;border-radius:20px;background:linear-gradient(135deg,#fef2f2,#fff);border:1px solid #fecaca;border-left:5px solid #ef4444;box-shadow:0 6px 18px rgba(239,68,68,.1);}
@@ -2915,6 +2935,13 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
     </div>
   </header>
 
+  <!-- Toast review dokumen (di bawah header) -->
+  <div id="ho-review-toast" onclick="openHOPendingPage()">
+    <div class="hrt-ic"><i class="fa-solid fa-file-circle-exclamation"></i></div>
+    <div class="hrt-tx"><b id="hrt-title">—</b><small id="hrt-sub">Ketuk untuk membuka daftar review</small></div>
+    <button class="hrt-x" onclick="event.stopPropagation();hoReviewToastDismiss()" title="Sembunyikan">&times;</button>
+  </div>
+
   <!-- Konten dinamis -->
   <div id="ho-content" class="px-4 pt-4"></div>
 
@@ -3631,9 +3658,6 @@ function notifRefreshSoon(){
       .withSuccessHandler(function(r){
         notifData = (r && r.status === 'success') ? r : null;
         refreshNavDots(); renderNotifBell();
-        if(lcState.assList && lcState.assList.length && document.getElementById('lc-ass-list') && document.getElementById('lc-ass-list').children.length){
-          lcRenderAssessment(lcState.assList);
-        }
       })
       .withFailureHandler(function(){})
       .getNotifikasiUnit(userData.unit);
@@ -4100,6 +4124,8 @@ function doLogout(){
   _lcLoaded=false;
   wtpData=null; pbData=null; pbTime=0; notifData=null;
   document.getElementById('chatFAB').classList.remove('show');
+  window._hoPending = []; _hoReviewToastHidden = false;
+  var _rt = document.getElementById('ho-review-toast'); if(_rt) _rt.classList.remove('show');
 var _wn=document.getElementById('wtp-notif-area'); if(_wn){_wn.innerHTML='';_wn.style.display='none';}
   document.getElementById('aiChatWidget').classList.remove('visible');
   showPage('pg-login');
@@ -8421,9 +8447,11 @@ function loadDataHO(forceRefresh) {
   if (!contentEl) return;
 
   var isFresh = hoRawData && (Date.now() - _hoCacheTime) < CACHE_TTL_MS;
+  _hoReviewToastHidden = false;   // toast review tampil lagi setiap dashboard HO dibuka/refresh
   if (isFresh && !forceRefresh) {
     renderHODashboard(hoRawData);
     loadPendingReviews();
+    hoReviewToastRender();
     // if (_hoOpCache)  renderHOOperasionalDonuts(_hoOpCache); // ⛔ disembunyikan sementara (poin 4)
     if (_hoWtpExtCache) renderHOWtpExtDonuts(_hoWtpExtCache);
     if (_hoWtpCache)    renderHOWtpDonuts(_hoWtpCache);
@@ -10169,7 +10197,7 @@ function lcRenderAssessment(list){
     card.className = 'lc-as2 ' + st.c;
     card.style.animationDelay = (i * 40) + 'ms';
     card.innerHTML =
-      '<div class="lc-as2-ico">' + lcAssIcon(m) + ndBadge(lcModulNotif(m)) + '</div>' +
+      '<div class="lc-as2-ico">' + lcAssIcon(m) + lcScoreBadge(score) + '</div>' +
       '<div class="lc-as2-t">' + lcEsc(m) + '</div>' +
       '<span class="lc-as2-p">' + st.p + '</span>' +
       (revisi > 0 ? '<div class="lc-as2-r">' + revisi + '× remedial</div>' : '');
@@ -10178,9 +10206,9 @@ function lcRenderAssessment(list){
   });
 }
 
-function lcModulNotif(nama){
-  var i = ASSESS_MATERI_FULL.indexOf(nama);
-  return (i > -1 && notifData && notifData.perModul) ? (notifData.perModul[i] || 0) : 0;
+function lcScoreBadge(s){
+  s = Number(s) || 0;
+  return '<span class="nd' + (s >= 90 ? ' ok' : '') + '" style="min-width:26px;">' + s + '</span>';
 }
 
 /* ── MEDIA VIEWER (REVISI SMOOTH TOUCH & FULLSCREEN) ── */
@@ -13685,18 +13713,36 @@ function hoRefreshDots(){
   window._hoCounts=c;
 }
 
-/* ── 4. Toast khusus review dokumen (muncul di header atas, bisa diklik) ── */
+/* ── 4. Toast review dokumen HO — menempel di bawah header, tetap tampil selama masih ada pending ── */
+var _hoReviewToastHidden = false;
+
 function renderPendingBannerHO(items){
-  window._hoPending=items||[];
+  window._hoPending = items || [];
   try{ hoRefreshDots(); }catch(e){}
-  var n=window._hoPending.length;
-  var pg=document.getElementById('pg-ho');
-  if(n>0 && pg && pg.classList.contains('active')){
-    showToast('⏳ '+n+' dokumen menunggu review · ketuk untuk membuka',6000);
-    var t=document.getElementById('toast');
-    t.style.cursor='pointer';
-    t.onclick=function(){ t.style.display='none'; openHOPendingPage(); };
+  hoReviewToastRender();
+}
+
+function hoReviewToastRender(){
+  var el = document.getElementById('ho-review-toast');
+  if(!el) return;
+  var list = window._hoPending || [];
+  var n = list.length;
+  if(!n || _hoReviewToastHidden){
+    el.classList.remove('show');
+    return;
   }
+  var units = {};
+  list.forEach(function(i){ units[i.pabrik] = 1; });
+  var nUnit = Object.keys(units).length;
+  document.getElementById('hrt-title').textContent = n + ' dokumen menunggu review';
+  document.getElementById('hrt-sub').textContent   = 'Dari ' + nUnit + ' unit · ketuk untuk membuka daftar review';
+  el.classList.add('show');
+}
+
+function hoReviewToastDismiss(){
+  _hoReviewToastHidden = true;          // sembunyi sementara; muncul lagi saat data di-refresh
+  var el = document.getElementById('ho-review-toast');
+  if(el) el.classList.remove('show');
 }
 
 /* ── 5. Daftar notifikasi HO (assessment = 1 notif per orang) ── */
