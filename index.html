@@ -2285,7 +2285,7 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
 <div id="boiler-list" class="px-4 space-y-3"></div>
 
 
-<h3 class="sec-h">Kualitas Air (WTP)</h3>
+<h3 class="sec-h">Water Quality</h3>
 <div id="wtp-area" class="px-4"></div>
 
 <h3 class="sec-h">Assessment SOP &amp; IK Boiler</h3>
@@ -2897,7 +2897,7 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
           <div class="ev-btn-dot"></div>
           <i class="fa-solid fa-trophy" style="font-size:12px;"></i>
           <span>Event</span>
-        </button>
+        </button>        
         <button onclick="navTo('learning')" title="Learning Centre"
           style="width:38px;height:38px;border-radius:50%;background:rgba(255,255,255,.15);
                  border:1px solid rgba(255,255,255,.2);color:white;display:flex;
@@ -3606,7 +3606,11 @@ function ndBadge(n){ return n > 0 ? '<span class="nd">' + (n > 9 ? '9+' : n) + '
 /* ═══ NOTIFIKASI (sumber: server → getNotifikasiUnit) ═══ */
 var notifData = null, _notifTimer = null;
 
-function notifCount(kat){ return (notifData && notifData.perKategori) ? (notifData.perKategori[kat] || 0) : 0; }
+function notifCount(kat){
+  var n = (notifData && notifData.perKategori) ? (notifData.perKategori[kat] || 0) : 0;
+  if(kat === 'performance' && !n && pbNeed()) n = 1;
+  return n;
+}
 function notifWtpCount(kind){
   if(!notifData || !notifData.items) return 0;
   var pre = (kind === 'int') ? 'WTP Internal' : 'WTP Eksternal';
@@ -3616,6 +3620,7 @@ function navCount(key){
   if(!userData || !notifData) return 0;
   if(key === 'boiler') return notifCount('simulasi') + notifCount('heatloss') + notifCount('riksa') + notifCount('performance');
   if(key === 'wtp') return notifCount('wtp');
+  if(key === 'learning') return notifCount('assessment');
   return 0;
 }
 function notifRefreshSoon(){
@@ -3626,6 +3631,9 @@ function notifRefreshSoon(){
       .withSuccessHandler(function(r){
         notifData = (r && r.status === 'success') ? r : null;
         refreshNavDots(); renderNotifBell();
+        if(lcState.assList && lcState.assList.length && document.getElementById('lc-ass-list') && document.getElementById('lc-ass-list').children.length){
+          lcRenderAssessment(lcState.assList);
+        }
       })
       .withFailureHandler(function(){})
       .getNotifikasiUnit(userData.unit);
@@ -3641,7 +3649,8 @@ var NOTIF_UI = {
   heatloss   : { ic:'🌡️', go:"menuGo('heatloss')" },
   riksa      : { ic:'📋', go:"menuGo('riksa')" },
   wtp        : { ic:'💧', go:"openWtpHub()" },
-  performance: { ic:'📈', go:"openPerformancePage()" }
+  performance: { ic:'📈', go:"openPerformancePage()" },
+  assessment : { ic:'📝', go:"navTo('learning');lcSwitchTab('assessment')" }
 };
 var NOTIF_COL = { expired:'#dc2626', perhatian:'#d97706', belum:'#64748b', diluar_standard:'#ea580c' };
 
@@ -4022,13 +4031,6 @@ function renderHOStandby(res){
   sec.innerHTML = head + belumHtml + body;
 }
 
-function showToast(msg,dur){
-  dur=dur||2800;
-  var t=document.getElementById('toast');
-  t.textContent=msg;t.style.display='block';
-  clearTimeout(t._t);t._t=setTimeout(function(){t.style.display='none';},dur);
-}
-
 /* ═══════════════════════════════════════
    LOGIN
    ═══════════════════════════════════════ */
@@ -4188,6 +4190,7 @@ function loadData(unit, silent){
   loadWtpExt(unit);
   loadStandbyStatus(unit);
   loadEfisiensiPrefetch(unit);
+  loadPerformancePrefetch(unit);
   notifRefreshSoon();
   // loadOperasional(unit);   // ⛔ OPERASIONAL BOILER — disembunyikan sementara (poin 4)
     google.script.run
@@ -4470,15 +4473,6 @@ function renderWtpTiles() {
   wtpRenderNotif();
   refreshNavDots();
 }
-
-function openWtpPanel(kind) {
-  document.getElementById('wtp-pane-int').style.display = (kind === 'int') ? '' : 'none';
-  document.getElementById('wtp-pane-ext').style.display = (kind === 'ext') ? '' : 'none';
-  document.getElementById('wtp-modal-title').textContent = 'WTP ' + (kind === 'int' ? 'Internal' : 'External') + ' — ' + (userData ? userData.unit : '');
-  document.getElementById('modal-wtp').classList.add('open');
-  if (kind === 'int') renderWtpZmd(); else renderWtpExt();
-}
-function closeWtpPanel() { document.getElementById('modal-wtp').classList.remove('open'); }
 
 var WTP_LINE_COLORS = ['#5B9BD5', '#2DD4BF', '#38BDF8', '#818CF8', '#A78BFA', '#F472B6', '#34D399'];
 var WTP_DANGER_COLOR  = '#B91C1C'; // merah tegas, tidak neon
@@ -5301,28 +5295,6 @@ var PK_SIM_SVG =
   '<path class="pk-bell" d="M20 8c-4 0-6.5 3.3-6.5 7.3v5.2l-2.6 3.9h18.2l-2.6-3.9v-5.2C26.5 11.3 24 8 20 8z" fill="#fff"/>' +
   '<circle cx="20" cy="27.5" r="2.2" fill="#b45309"/></svg>';
 
-function openBoilerPicker(){
-  var hlExcl = userData && isHeatlossExcludedUnit(userData.unit);
-  var old = document.getElementById('boiler-picker-modal');
-  if(old) old.remove();
-  var items =
-    '<button class="pk-item pop" style="animation-delay:0ms" onclick="closeBoilerPicker();navTo(\'riksa\');">' +
-      '<div class="pk-ic c-riksa">'+PK_RIKSA_SVG+'</div><b>Riksa Uji</b><small>Sertifikat</small></button>' +
-    (hlExcl ? '' :
-    '<button class="pk-item pop" style="animation-delay:70ms" onclick="closeBoilerPicker();navTo(\'heatloss\');">' +
-      '<div class="pk-ic c-heat">'+PK_HEAT_SVG+'</div><b>Heatloss</b><small>Monitoring</small></button>') +
-    '<button class="pk-item pop" style="animation-delay:140ms" onclick="closeBoilerPicker();navTo(\'simulasi\');">' +
-      '<div class="pk-ic c-sim">'+PK_SIM_SVG+'</div><b>Simulasi</b><small>Darurat</small></button>';
-  document.body.insertAdjacentHTML('beforeend',
-    '<div id="boiler-picker-modal" class="open">' +
-      '<div class="bm-overlay" onclick="closeBoilerPicker()"></div>' +
-      '<div class="bm-sheet"><div class="bm-handle"></div>' +
-      '<p class="bm-title">Boiler</p><p class="bm-sub">Pilih modul yang ingin dibuka</p>' +
-      '<div class="pk-grid">'+items+'</div></div></div>');
-  renderMainNav('boiler');
-}
-function closeBoilerPicker(){ var m=document.getElementById('boiler-picker-modal'); if(m) m.remove(); }
-
 /* ═══════════════════════════════════════
    WTP HUB — External / Internal / Vendor (grid ikon modern)
    ═══════════════════════════════════════ */
@@ -5337,28 +5309,6 @@ var WTP_ICON_INT =
 var WTP_ICON_VEN =
   '<svg viewBox="0 0 40 40"><rect class="wg-ripple" x="6" y="6" width="28" height="28" rx="9" fill="rgba(255,255,255,.25)"/>' +
   '<path d="M26 13a5.5 5.5 0 0 0-7.4 6.9L9 29.5l2.5 2.5 9.6-9.6A5.5 5.5 0 0 0 28 15l-3 3-2.5-.5-.5-2.5z" fill="#fff" stroke="none"/></svg>';
-
-function openWtpHub(){
-  if(!userData){ showToast('Silakan login dulu'); return; }
-  var isHO = String(userData.unit||'').toUpperCase()==='HEAD OFFICE';
-  if(isHO){ showToast('WTP tersedia untuk unit pabrik'); return; }
-  var old = document.getElementById('wtp-hub-page'); if(old) old.remove();
-  document.body.insertAdjacentHTML('beforeend',
-    '<div id="wtp-hub-page" style="position:fixed;inset:0;z-index:700;background:#f0f8ff;overflow-y:auto;padding-bottom:90px;">' +
-      '<div style="background:var(--navy);padding:18px 18px 22px;color:#fff;">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;">' +
-          '<div><p style="font-size:10px;opacity:.5;letter-spacing:.1em;text-transform:uppercase;font-weight:700;margin:0;">Kualitas Air</p>' +
-          '<h2 style="font-family:\'Miriam Libre\',sans-serif;font-size:24px;margin:2px 0 0;">WTP · '+userData.unit+'</h2></div>' +
-          '<button onclick="document.getElementById(\'wtp-hub-page\').remove()" style="width:38px;height:38px;border-radius:50%;border:none;background:rgba(255,255,255,.15);color:#fff;font-size:16px;cursor:pointer;"><i class="fa-solid fa-xmark"></i></button>' +
-        '</div></div>' +
-      '<div class="wg-grid">' +
-        '<button class="wg-item ext pop" style="animation-delay:0ms" onclick="openWtpPanel(\'int\')"><div class="wg-ic">'+WTP_ICON_INT+'</div><b>WTP Internal</b><small>Parameter Boiler</small></button>' +
-        '<button class="wg-item int pop" style="animation-delay:70ms" onclick="openWtpPanel(\'ext\')"><div class="wg-ic">'+WTP_ICON_EXT+'</div><b>WTP External</b><small>Parameter Eksternal</small></button>' +
-        '<button class="wg-item ven pop" style="animation-delay:140ms" onclick="showToast(\'Menu Vendor sedang dalam pengembangan 🚧\')"><div class="wg-ic">'+WTP_ICON_VEN+'</div><b>Vendor</b><small>Segera Hadir</small></button>' +
-      '</div>' +
-    '</div>');
-  renderMainNav('wtp');
-}
 
 /* ═══════════════════════════════════════
    MENU PAGE — Boiler & WTP (gaya Assessment: ikon SVG animasi, tanpa card)
@@ -5536,13 +5486,6 @@ var MP_ICO = {
     '</svg>'
 };
 
-function closeMenuPages(){
-  ['boiler-menu-page','wtp-hub-page','boiler-picker-modal','efisiensi-page','performance-page'].forEach(function(id){
-    var e = document.getElementById(id);
-    if(e) e.remove();
-  });
-}
-
 function openMenuPage(cfg){
   closeMenuPages();
   var items = cfg.items.map(function(it, i){
@@ -5604,193 +5547,12 @@ function mpPill(n, neutralTxt){
   return { cls:'warn', p:n + ' perlu update' };
 }
 
-function openBoilerPicker(){
-  if(!userData){ showToast('Silakan login dulu'); return; }
-  var hlExcl = isHeatlossExcludedUnit(userData.unit);
-  var st = mpBoilerStatus();
-  var pr = mpPill(st.riksa, 'Sertifikat');
-  var ph = mpPill(st.heat,  'Monitoring');
-  var ps = mpPill(st.sim,   'Darurat');
-  var items = [
-    { cls:pr.cls, svg:MP_ICO.riksa, t:'Riksa Uji', p:pr.p, on:"navTo('riksa')" }
-  ];
-  if(!hlExcl){
-    items.push({ cls:ph.cls, svg:MP_ICO.thermal, t:'Heatloss', p:ph.p, on:"navTo('heatloss')" });
-  }
-  items.push({ cls:ps.cls, svg:MP_ICO.sim, t:'Simulasi Darurat', p:ps.p, on:"navTo('simulasi')" });
-  items.push({ cls:'info', svg:MP_ICO.efisiensi,   t:'Efisiensi Boiler',   p:'Uji Efisiensi', on:"openEfisiensiPage()" });
-  items.push({ cls:'soon', svg:MP_ICO.performance, t:'Performance Boiler', p:'Segera Hadir',  on:"openPerformancePage()" });
-  openMenuPage({
-    id:'boiler-menu-page', nav:'boiler',
-    eyebrow:'Unit ' + userData.unit, title:'Boiler',
-    sub:'', items:items
-  });
-}
 function closeBoilerPicker(){ closeMenuPages(); }
-
-function openWtpHub(){
-  if(!userData){ showToast('Silakan login dulu'); return; }
-  var isHO = String(userData.unit || '').toUpperCase() === 'HEAD OFFICE';
-  if(isHO){ showToast('WTP tersedia untuk unit pabrik'); return; }
-  var ti = wtpTileInfo('int'), te = wtpTileInfo('ext');
-  function pill(i, ok){
-    if(!i) return { cls:'info', p:ok };
-    return i.bad ? { cls:'warn', p:i.bad + ' di bawah standar' } : { cls:'ok', p:'Sesuai standar' };
-  }
-  var pi = pill(ti, 'Parameter Boiler'), pe = pill(te, 'Parameter Eksternal');
-  openMenuPage({
-    id:'wtp-hub-page', nav:'wtp',
-    eyebrow:'Kualitas Air', title:'WTP · ' + userData.unit,
-    sub:'',
-    items:[
-      { cls:pi.cls, svg:MP_ICO.wtpInt, t:'Internal Treatment', p:pi.p, dot:(ti&&ti.bad)?1:0, on:"wtpGo('int')" },
-      { cls:pe.cls, svg:MP_ICO.wtpExt, t:'External Treatment', p:pe.p, dot:(te&&te.bad)?1:0, on:"wtpGo('ext')" },
-      { cls:'soon',  svg:MP_ICO.vendor, t:'Vendor', p:'Segera Hadir', on:"showToast('Menu Vendor sedang dalam pengembangan 🚧')" }
-    ]
-  });
-}
 
 /* ═══════════════════════════════════════
    EFISIENSI BOILER & PERFORMANCE BOILER (sub-page dari menu Boiler)
    ═══════════════════════════════════════ */
 var efData = null, efCharts = [];
-
-function openSubPage(cfg){
-  closeMenuPages();
-  document.body.insertAdjacentHTML('beforeend',
-    '<div id="' + cfg.id + '" class="mp-page">' +
-      '<div class="mp-head">' +
-        '<button class="mp-back" onclick="openBoilerPicker()"><i class="fa-solid fa-arrow-left"></i></button>' +
-        '<div style="position:relative;z-index:1;">' +
-          '<p class="mp-eyebrow">' + cfg.eyebrow + '</p>' +
-          '<h2 class="mp-title">' + cfg.title + '</h2>' +
-          '<p class="mp-sub">' + cfg.sub + '</p>' +
-        '</div>' +
-      '</div>' +
-      '<div style="padding-top:20px;">' + cfg.body + '</div>' +
-      '<nav class="nav-bar nav4 fixed bottom-0 left-0 w-full flex justify-around items-center py-2 px-2" style="z-index:5;" data-nav="main"></nav>' +
-    '</div>');
-  renderMainNav('boiler');
-  var pg = document.getElementById(cfg.id);
-  if(pg) pg.scrollTop = 0;
-}
-
-function openEfisiensiPage(){
-  if(!userData){ showToast('Silakan login dulu'); return; }
-  efData = null;
-  openSubPage({
-    id:'efisiensi-page',
-    eyebrow:'Unit ' + userData.unit, title:'Efisiensi Boiler',
-    sub:'Hasil Uji Efisiensi Boiler',
-    body:'<div id="ef-body" style="padding:0 16px;"><div class="skel" style="height:220px;"></div><div class="skel" style="height:120px;"></div></div>'
-  });
-  google.script.run
-    .withSuccessHandler(function(res){ efData = res; renderEfisiensi(); })
-    .withFailureHandler(function(err){
-      var el = document.getElementById('ef-body');
-      if(el) el.innerHTML = '<div class="ef-none" style="margin:0;">❌ Gagal memuat data: ' + lcEsc(err.message || '') + '</div>';
-    })
-    .getEfisiensiBoiler(userData.unit);
-}
-
-function renderEfisiensi(){
-  var el = document.getElementById('ef-body');
-  if(!el) return;
-  efCharts.forEach(function(c){ try{ c.destroy(); }catch(e){} });
-  efCharts = [];
-  el.style.padding = '0';
-
-  if(!efData || efData.status === 'error'){
-    el.innerHTML = '<div class="ef-card"><div class="ef-none">❌ ' + lcEsc((efData && efData.message) || 'Data tidak tersedia') + '</div></div>';
-    return;
-  }
-  if(efData.status === 'empty' || !efData.groups || !efData.groups.length){
-    el.innerHTML = '<div class="ef-card"><div class="ef-none"><span style="font-size:22px;">⚠️</span><span>Belum dilakukan Uji Efisiensi Boiler.</span></div></div>';
-    return;
-  }
-
-  var html = '';
-  efData.groups.forEach(function(g, gi){
-    var yrs = (efData.years || []).filter(function(y){ return g.data[y] != null; });
-    var title = g.boiler ? boilerLabelFix(userData.unit, g.boiler) : ('Pabrik ' + userData.unit);
-    var sub   = g.boiler ? ('Unit ' + userData.unit) : 'Seluruh boiler pabrik';
-
-    var body = '';
-    if(!yrs.length){
-      body = '<div class="ef-none"><span style="font-size:22px;">⚠️</span><span>Belum dilakukan Uji Efisiensi Boiler.</span></div>';
-    } else {
-      if(yrs.length === 1){
-        body = '<div class="ef-big"><b>' + g.data[yrs[0]].toFixed(1) + '%</b><small>Efisiensi tahun ' + yrs[0] + '</small></div>';
-      } else {
-        body = '<div style="height:220px;position:relative;"><canvas id="ef-chart-' + gi + '"></canvas></div>';
-      }
-      body += '<div class="ef-years">';
-      yrs.forEach(function(y, i){
-        var delta = '';
-        if(i > 0){
-          var d = Math.round((g.data[y] - g.data[yrs[i-1]]) * 10) / 10;
-          if(d > 0) delta = '<span class="ef-yr-d ef-up">▲ ' + d.toFixed(1) + '</span>';
-          else if(d < 0) delta = '<span class="ef-yr-d ef-dn">▼ ' + Math.abs(d).toFixed(1) + '</span>';
-          else delta = '<span class="ef-yr-d" style="color:#94a3b8;">—</span>';
-        }
-        body += '<div class="ef-yr"><span class="ef-yr-y">' + y + '</span>' +
-          '<span><span class="ef-yr-v">' + g.data[y].toFixed(1) + '%</span>' + delta + '</span></div>';
-      });
-      body += '</div>';
-
-      var lastY = yrs[yrs.length - 1];
-      if(g.remarks){
-        body += '<div class="ef-box ket"><p>Keterangan · ' + lastY + '</p>' + lcEsc(g.remarks).replace(/\n/g,'<br>') + '</div>';
-      }
-      if(g.rekom){
-        body += '<div class="ef-box rek"><p>💡 Rekomendasi · ' + lastY + '</p>' + lcEsc(g.rekom).replace(/\n/g,'<br>') + '</div>';
-      }
-    }
-
-    html += '<div class="ef-card" style="animation-delay:' + (gi * 70) + 'ms">' +
-      '<div class="ef-card-h"><div class="ef-card-ico"><i class="fa-solid fa-fire-flame-curved"></i></div>' +
-      '<div><div class="ef-card-t">' + title + '</div><div class="ef-card-s">' + sub + '</div></div></div>' +
-      body + '</div>';
-  });
-  el.innerHTML = html;
-
-  // grafik: hanya tahun yang ada nilainya (tahun kosong dilewati)
-  efData.groups.forEach(function(g, gi){
-    var yrs = (efData.years || []).filter(function(y){ return g.data[y] != null; });
-    if(yrs.length < 2) return;
-    var cv = document.getElementById('ef-chart-' + gi);
-    if(!cv) return;
-    Chart.defaults.font.family = WTP_FONT;
-    efCharts.push(efMakeChart(cv, yrs, g)); return;
-    efCharts.push(new Chart(cv.getContext('2d'), {
-      type:'bar',
-      data:{
-        labels: yrs.map(String),
-        datasets:[{
-          label:'Efisiensi (%)',
-          data: yrs.map(function(y){ return g.data[y]; }),
-          backgroundColor: yrs.map(function(_, i){ return WTP_LINE_COLORS[i % WTP_LINE_COLORS.length]; }),
-          borderRadius: WTP_BAR_RADIUS, borderSkipped:false, maxBarThickness:50
-        }]
-      },
-      plugins:[wtpValueBadgePlugin],
-      options:{
-        maintainAspectRatio:false,
-        layout:{ padding:{ top:34 } },
-        plugins:{
-          legend:{ display:false },
-          tooltip:{ backgroundColor:'rgba(3,4,94,.96)', padding:12, cornerRadius:12,
-            callbacks:{ label:function(c){ return ' ' + c.parsed.y.toFixed(1) + '%'; } } },
-          wtpValueBadge:{ datasetIndexes:[0] }
-        },
-        scales:{
-          x:{ grid:{display:false}, border:{display:false}, ticks:{ font:{size:11,weight:'700'}, color:'#64748b' } },
-          y:{ min:0, max:100, display:false, grid:{display:false}, border:{display:false} }
-        }
-      }
-    }));
-  });
-}
 
 /* Grafik Efisiensi — bar kapsul + track, gaya donut dashboard */
 var efTrackPlugin = {
@@ -5860,25 +5622,6 @@ function efMakeChart(cv, yrs, g){
       }
     }
   });
-}
-
-function renderUtilitasCard(){
-  var el = document.getElementById('utilitas-card');
-  if(!el) return;
-
-  if(!utilitasData || !utilitasData.pct && utilitasData.pct !== 0){
-    el.classList.add('hidden');
-    return;
-  }
-  el.classList.remove('hidden');
-
-  var isLow = utilitasData.pct < 95;
-  var pctColor = isLow ? '#fca5a5' : '#a7f3d0';
-
-  el.innerHTML =
-    '<p style="font-size:10px;text-transform:uppercase;letter-spacing:.05em;opacity:.6;margin:0 0 2px;">Jam Olah · '+utilitasData.bulan+'</p>'+
-    '<p style="font-size:22px;font-weight:800;line-height:1;margin:0;color:'+pctColor+';">'+utilitasData.pct.toFixed(1)+'%</p>'+
-    (isLow ? '<p style="font-size:9px;color:#fca5a5;margin-top:3px;font-weight:700;">⚠ Di bawah target</p>' : '<p style="font-size:9px;opacity:.5;margin-top:3px;">Tap untuk grafik ›</p>');
 }
 
 function openUtilitasModal(){
@@ -7769,7 +7512,7 @@ function hlPhotoLastNo(){
 /* ── DOWNLOAD TEMPLATE ── */
 async function downloadHeatlossTemplate(){
   try{
-    if(typeof ExcelJS==='undefined'){ showToast('Library Excel belum termuat, coba lagi'); return; }
+    if(typeof ExcelJS==='undefined'){ showToast('Library Excel belum selesai loading, coba lagi'); return; }
     showToast('Preparing form Excel...',1500);
     var photoLastNo = hlPhotoLastNo();
     var wb = new ExcelJS.Workbook();
@@ -8929,57 +8672,6 @@ function drawHODonut(canvasId, aktif, perhatian, expired, isSimulasi) {
     }
   });
 }
-function renderHOWtpDonuts(res) {
-  var section = document.getElementById('ho-wtp-section');
-  if (!section) return;
-
-  if (!res || res.status !== 'success' || !res.params) {
-    section.innerHTML =
-      '<p class="section-label" style="margin-bottom:10px;">Parameter Air WTP — Semua Unit</p>' +
-      '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
-    return;
-  }
-
-  window._hoWtpParams = res.params;
-
-  var WTP_HO_DISPLAY_ORDER = ['pH', 'M-Alk', 'Silica', 'O-Alk/Silica', 'Sulfite', 'TDS', 'Phosphate'];
-  var paramLabels = WTP_HO_DISPLAY_ORDER.filter(function(lbl) {
-    return res.params.hasOwnProperty(lbl);
-  });
-  var html = '<p class="section-label" style="margin-bottom:14px;">Parameter Air WTP — Semua Unit</p>';
-  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">';
-
-  paramLabels.forEach(function(lbl, i) {
-    var d = res.params[lbl];
-    var normal = d.normalUnits.length;
-    var below  = d.belowUnits.length;
-    var total  = normal + below;
-    var pctNormal = total > 0 ? Math.round((normal / total) * 100) : 0;
-    var canvasId = 'wtp-ho-donut-' + i;
-
-    html +=
-      '<div style="text-align:center;cursor:pointer;" onclick="openWtpHODetailModal(\'' + lbl.replace(/'/g,"\\'") + '\')">' +
-        '<p style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px;">' + lbl + '</p>' +
-        '<div style="position:relative;display:inline-block;">' +
-          '<canvas id="' + canvasId + '" width="88" height="88"></canvas>' +
-          '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">' +
-            '<span style="font-size:15px;font-weight:900;color:var(--text-1);line-height:1;">' + pctNormal + '%</span>' +
-          '</div>' +
-        '</div>' +
-        '<p style="font-size:9px;color:#cbd5e1;margin-top:4px;">' + total + ' unit · Tap detail ›</p>' +
-      '</div>';
-  });
-  html += '</div>';
-
-  section.innerHTML = html;
-
-  setTimeout(function() {
-    paramLabels.forEach(function(lbl, i) {
-      var d = res.params[lbl];
-      drawHODonut('wtp-ho-donut-' + i, d.normalUnits.length, 0, d.belowUnits.length, false);
-    });
-  }, 80);
-}
 
 // ── HO: WTP EKSTERNAL DONUTS ──────────────────────────────────
 var WTP9_PARAM_LABELS_JS = ['Clarifier', 'Sand Filter', 'Hardness', 'Silica', 'pH FT', 'TDS FT'];
@@ -9198,151 +8890,6 @@ function renderWtpExtHOUnitChart(unit) {
       }
     }
   });
-}
-
-/* ═══════════════════════════════════════
-   HO — DONUT UTILITAS PABRIK (2 bagian: ≥95% vs <95%)
-   ═══════════════════════════════════════ */
-window._hoUtilitasData = null;
-
-function renderHOUtilitasDonut(res) {
-  var section = document.getElementById('ho-utilitas-section');
-  if (!section) return;
-
-  if (!res || res.status !== 'success') {
-    section.innerHTML =
-      '<p class="section-label" style="margin-bottom:10px;">% Breakdown Pabrik — Semua Unit</p>' +
-      '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
-    return;
-  }
-
-  window._hoUtilitasData = res;
-  var normal = res.normalUnits || [];
-  var below  = res.belowUnits  || [];
-  var total  = normal.length + below.length;
-
-  var html = '<p class="section-label" style="margin-bottom:14px;">% Breakdown Pabrik — Semua Unit</p>';
-
-  html +=
-    '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:flex-start;">' +
-
-      // ── Kolom kiri: Donut (atas) + 2 stat card (bawah) ────────
-      '<div style="flex:1 1 260px;min-width:240px;">' +
-        '<div style="display:flex;justify-content:center;cursor:pointer;" onclick="openUtilitasHODetailModal()">' +
-          '<div style="position:relative;width:100%;max-width:170px;aspect-ratio:1/1;">' +
-            '<canvas id="donut-utilitas" style="width:100%;height:100%;display:block;"></canvas>' +
-            '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">' +
-              '<span style="font-size:24px;font-weight:900;color:var(--text-1);line-height:1;">' + total + '</span>' +
-              '<span style="font-size:10px;font-weight:600;color:#94a3b8;">Pabrik</span>' +
-            '</div>' +
-          '</div>' +
-        '</div>' +
-        '<div style="display:flex;gap:8px;margin-top:10px;">' +
-          '<div class="ho-stat-card aktif" onclick="openUtilitasHODetailModal(\'normal\')" style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:8px 4px;">' +
-            '<div class="ho-stat-num aktif" style="font-size:20px;">' + normal.length + '</div>' +
-            '<div class="ho-stat-lbl" style="font-size:9px;">≥ 95%</div>' +
-          '</div>' +
-          '<div class="ho-stat-card expired" onclick="openUtilitasHODetailModal(\'below\')" style="flex:1;display:flex;flex-direction:column;justify-content:center;align-items:center;padding:8px 4px;">' +
-            '<div class="ho-stat-num expired" style="font-size:20px;">' + below.length + '</div>' +
-            '<div class="ho-stat-lbl" style="font-size:9px;">&lt; 95%</div>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-
-      // ── Kolom kanan: Slicer + Bar chart breakdown ─────────────
-      '<div style="flex:1 1 300px;min-width:260px;">' +
-        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:6px;">' +
-          '<p style="font-size:11px;font-weight:700;color:#94a3b8;letter-spacing:.06em;text-transform:uppercase;margin:0;">Top Breakdown</p>' +
-          '<div class="period-tabs" style="padding-bottom:0;">' +
-            '<button class="period-tab hobd-tab active" data-mode="jenis"   onclick="hoSwitchBreakdownMode(\'jenis\')">Jenis Kerusakan</button>' +
-            '<button class="period-tab hobd-tab"        data-mode="mesin"   onclick="hoSwitchBreakdownMode(\'mesin\')">Unit Mesin</button>' +
-            '<button class="period-tab hobd-tab"        data-mode="station" onclick="hoSwitchBreakdownMode(\'station\')">Station</button>' +
-          '</div>' +
-        '</div>' +
-        '<div id="ho-jenis-kerusakan-wrap" style="height:220px;position:relative;">' +
-          '<div id="ho-jenis-kerusakan-loading" style="height:100%;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
-          '<canvas id="ho-jenis-kerusakan-chart" style="display:none;"></canvas>' +
-        '</div>' +
-        '<div id="ho-jenis-kerusakan-empty" style="display:none;padding:30px 0;text-align:center;color:#94a3b8;font-size:13px;">Belum ada data breakdown tahun ini.</div>' +
-      '</div>' +
-
-    '</div>';
-
-  section.innerHTML = html;
-
-  setTimeout(function() {
-    drawHODonut('donut-utilitas', normal.length, 0, below.length, false);
-    if (_hoBreakdownGroupCache) renderHOBreakdownGroupChart(_hoBreakdownGroupCache);
-  }, 80);
-}
-
-/* ═══════════════════════════════════════
-   HO — HM INSPEKSI (donut + detail)
-   ═══════════════════════════════════════ */
-window._hoHMData = null;
-
-function renderHOHMDonut(res) {
-  var section = document.getElementById('ho-hm-section');
-  if (!section) return;
-
-  if (!res || res.status !== 'success') {
-    section.innerHTML =
-      '<p class="section-label" style="margin-bottom:10px;">HM Inspeksi Boiler — Semua Unit</p>' +
-      '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
-    return;
-  }
-
-  window._hoHMData = res;
-  var lewat = res.lewat || [], dekat = res.dekat || [], baik = res.baik || [];
-  var total = lewat.length + dekat.length + baik.length;
-
-  function card(cnt, lbl, color, bg) {
-    return '<div onclick="openHMHODetailModal()" style="flex:1;background:' + bg + ';border-top:3px solid ' + color + ';border-radius:14px;padding:10px 6px;text-align:center;cursor:pointer;">' +
-      '<div style="font-size:24px;font-weight:900;color:' + color + ';line-height:1;">' + cnt + '</div>' +
-      '<div style="font-size:9px;font-weight:700;color:#64748b;letter-spacing:.05em;text-transform:uppercase;margin-top:4px;">' + lbl + '</div>' +
-    '</div>';
-  }
-
-  section.innerHTML =
-    '<p class="section-label" style="margin-bottom:14px;">HM Inspeksi Boiler — Semua Unit</p>' +
-    '<div style="display:flex;flex-wrap:wrap;gap:16px;align-items:center;">' +
-      '<div style="flex:0 0 130px;margin:0 auto;cursor:pointer;" onclick="openHMHODetailModal()">' +
-        '<div style="position:relative;width:130px;height:130px;">' +
-          '<canvas id="donut-hm" style="width:100%;height:100%;display:block;"></canvas>' +
-          '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">' +
-            '<span style="font-size:22px;font-weight:900;color:var(--text-1);line-height:1;">' + total + '</span>' +
-            '<span style="font-size:9px;font-weight:600;color:#94a3b8;">Boiler</span>' +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-      '<div style="flex:1 1 220px;display:flex;gap:8px;">' +
-        card(lewat.length, 'Sudah Lewat<br>&gt; 5000', '#dc2626', '#fef2f2') +
-        card(dekat.length, 'Mendekati<br>4500–5000', '#d97706', '#fffbeb') +
-        card(baik.length,  'Masih Baik<br>&lt; 4500', '#16a34a', '#f0fdf4') +
-      '</div>' +
-    '</div>' +
-    '<p style="font-size:10px;color:#cbd5e1;margin:10px 0 0;text-align:center;">Tap untuk detail ›</p>';
-
-  setTimeout(function() {
-    var canvas = document.getElementById('donut-hm');
-    if (!canvas) return;
-    if (Chart.getChart && Chart.getChart(canvas)) Chart.getChart(canvas).destroy();
-    new Chart(canvas.getContext('2d'), {
-      type: 'doughnut',
-      data: {
-        datasets: [{
-          data: total > 0 ? [lewat.length, dekat.length, baik.length] : [1],
-          backgroundColor: total > 0 ? ['#dc2626', '#d97706', '#16a34a'] : ['#e2e8f0'],
-          borderWidth: 0, borderRadius: 12, spacing: total > 0 ? 3 : 0, hoverOffset: 4
-        }]
-      },
-      options: {
-        cutout: '68%', maintainAspectRatio: true,
-        plugins: { legend: { display: false }, tooltip: { enabled: false } },
-        animation: { duration: 600 }
-      }
-    });
-  }, 80);
 }
 
 function openHMHODetailModal() {
@@ -10606,44 +10153,6 @@ function lcAssIcon(name){
   return LC_ICO.def;
 }
 
-/* ── MATERI: thumbnail + judul, 3 per baris ── */
-function lcRenderMateri(list){
-  lcState.materi = list;
-  var el = document.getElementById('lc-materi-list');
-  if(!list || !list.length){
-    el.innerHTML = '<p class="text-center text-gray-400 py-8">Belum ada materi tersedia.</p>';
-    return;
-  }
-  el.style.cssText = 'display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:0;';
-  el.innerHTML = '';
-  var FB = ['fa-fire-flame-curved','fa-gear','fa-screwdriver-wrench','fa-flask','fa-clipboard-list','fa-temperature-half','fa-triangle-exclamation'];
-
-  list.forEach(function(m, i){
-    var thumb = '';
-    if(m.gambar){
-      var u = m.gambar;
-      if(u.includes('drive.google.com')){
-        var g = u.match(/[-\w]{25,}/);
-        if(g) u = 'https://drive.google.com/uc?export=view&id=' + g[0];
-      }
-      thumb = '<img src="' + u + '" onerror="this.style.display=\'none\'">';
-    } else if(m.video){
-      var yt = m.video.match(/(?:embed\/|v=|youtu\.be\/)([^?&"'>]{11})/);
-      thumb = yt
-        ? '<img src="https://img.youtube.com/vi/' + yt[1] + '/mqdefault.jpg"><span class="lc-mt2-play"><i class="fa-solid fa-play"></i></span>'
-        : '<i class="fa-solid fa-circle-play lc-mt2-fb"></i>';
-    } else {
-      thumb = '<i class="fa-solid ' + FB[i % FB.length] + ' lc-mt2-fb"></i>';
-    }
-    var card = document.createElement('div');
-    card.className = 'lc-mt2';
-    card.style.animationDelay = (i * 40) + 'ms';
-    card.innerHTML = '<div class="lc-mt2-th">' + thumb + '</div><div class="lc-mt2-t">' + lcEsc(m.judul) + '</div>';
-    card.addEventListener('click', function(){ lcOpenMateri(i); });
-    el.appendChild(card);
-  });
-}
-
 /* ── ASSESSMENT: ikon animasi per judul, tanpa card ── */
 function lcRenderAssessment(list){
   var el = document.getElementById('lc-ass-list');
@@ -10660,13 +10169,18 @@ function lcRenderAssessment(list){
     card.className = 'lc-as2 ' + st.c;
     card.style.animationDelay = (i * 40) + 'ms';
     card.innerHTML =
-      '<div class="lc-as2-ico">' + lcAssIcon(m) + '</div>' +
+      '<div class="lc-as2-ico">' + lcAssIcon(m) + ndBadge(lcModulNotif(m)) + '</div>' +
       '<div class="lc-as2-t">' + lcEsc(m) + '</div>' +
       '<span class="lc-as2-p">' + st.p + '</span>' +
       (revisi > 0 ? '<div class="lc-as2-r">' + revisi + '× remedial</div>' : '');
     card.addEventListener('click', function(){ lcStartConfirm(m); });
     el.appendChild(card);
   });
+}
+
+function lcModulNotif(nama){
+  var i = ASSESS_MATERI_FULL.indexOf(nama);
+  return (i > -1 && notifData && notifData.perModul) ? (notifData.perModul[i] || 0) : 0;
 }
 
 /* ── MEDIA VIEWER (REVISI SMOOTH TOUCH & FULLSCREEN) ── */
@@ -11612,76 +11126,6 @@ function renderPendingBanner(items) {
   area.insertAdjacentHTML('afterbegin', html);
 }
 
-// ── Banner untuk HO ───────────────────────────────────────────
-function renderPendingBannerHO(items) {
-  var contentEl = document.getElementById('ho-content');
-  if (!contentEl) return;
-
-  var old = document.getElementById('ho-pending-banner');
-  if (old) old.remove();
-
-  if (!items || !items.length) return;
-
-  // Kelompokkan per pabrik
-  var grouped = {};
-  items.forEach(function(item) {
-    if (!grouped[item.pabrik]) grouped[item.pabrik] = [];
-    grouped[item.pabrik].push(item);
-  });
-
-  var html =
-    '<div id="ho-pending-banner" style="background:white;border-radius:var(--radius-md);' +
-    'border-left:4px solid #f59e0b;box-shadow:var(--shadow-sm);margin-bottom:16px;overflow:hidden;">' +
-
-    '<div style="background:#fffbeb;padding:14px 16px;cursor:pointer;' +
-    'display:flex;align-items:center;gap:10px;" onclick="toggleHOReviewBanner()">' +
-      '<span style="font-size:20px;">⏳</span>' +
-      '<div style="flex:1;">' +
-        '<p style="font-size:14px;font-weight:800;color:#b45309;margin:0;">Dokumen Menunggu Review</p>' +
-        '<p style="font-size:12px;color:#d97706;margin:3px 0 0;">' +
-          items.length + ' dokumen dari ' + Object.keys(grouped).length + ' unit perlu dikonfirmasi</p>' +
-      '</div>' +
-      '<i id="ho-review-chevron" class="fa-solid fa-chevron-down" ' +
-      'style="color:#d97706;font-size:13px;transition:transform .3s;"></i>' +
-    '</div>' +
-
-    '<div id="ho-review-body" style="max-height:0;overflow:hidden;transition:max-height .35s ease;">';
-
-  Object.keys(grouped).sort().forEach(function(pabrik) {
-    html +=
-      '<div style="padding:10px 16px 0;">' +
-      '<p style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.1em;' +
-      'text-transform:uppercase;margin:0 0 6px;">' + pabrik + ' · ' + grouped[pabrik].length + ' dokumen</p>';
-
-    grouped[pabrik].forEach(function(item) {
-      var tipeLabel   = item.tipe === 'heatloss' ? '🌡️ Heatloss' : '📋 Riksa';
-      var boilerLabel = /^boiler\s/i.test(item.boiler) ? item.boiler : 'Boiler ' + item.boiler;
-
-      html +=
-        '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;' +
-        'padding:8px 0;border-bottom:1px solid #fde68a;">' +
-          '<div style="flex:1;min-width:0;">' +
-            '<p style="font-size:13px;font-weight:700;color:#111;margin:0;">' +
-              tipeLabel + ' · ' + boilerLabel + '</p>' +
-            '<p style="font-size:11px;color:#6b7280;margin:2px 0 0;">' +
-              item.timestamp + ' · by ' + (item.email || '—') + '</p>' +
-          '</div>' +
-          (item.fileUrl
-            ? '<a href="' + item.fileUrl + '" target="_blank" ' +
-              'style="padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;' +
-              'background:#0077B6;color:white;text-decoration:none;flex-shrink:0;">Review ›</a>'
-            : '<span style="font-size:11px;color:#94a3b8;">No file</span>') +
-        '</div>';
-    });
-
-    html += '</div>';
-  });
-
-  html += '<div style="height:14px;"></div></div></div>';
-
-  // Sisipkan di paling atas konten HO
-  contentEl.insertAdjacentHTML('afterbegin', html);
-}
 
 function toggleReviewBanner() {
   var body    = document.getElementById('review-banner-body');
@@ -12446,7 +11890,7 @@ function confirmEndEvent() {
           localStorage.setItem('ev_last_winner', JSON.stringify(winner));
         }
         _evData = null;
-        showToast('✅ Event telah diakhiri');showToast('✅ Event telah diakhiri');
+        showToast('✅ Event telah diakhiri');
         document.querySelectorAll('.ev-header-btn').forEach(function(b) {
           b.classList.remove('show'); b.style.display = 'none';
         });
@@ -12762,7 +12206,7 @@ function renderPerformance(){
       '</div>' +
     '</div>';
 
-  html += pbNeed()
+  html += pbViewUnit ? '' : pbNeed()
     ? '<div class="pb-alert"><div class="pb-alert-ic"><i class="fa-solid fa-triangle-exclamation"></i></div>' +
         '<div style="flex:1;min-width:0;"><b>Data ' + t.label + ' belum diisi</b><small>Lengkapi data performance bulan lalu.</small></div>' +
         '<button class="pb-btn" onclick="openPerformanceForm()">Isi Sekarang</button></div>'
@@ -12778,7 +12222,7 @@ function renderPerformance(){
   var slots = pbSlots().map(String);
   if(pbTab !== 'u' && slots.indexOf(pbTab) === -1) pbTab = slots[0];
   var isU = (pbTab === 'u'), b = isU ? 0 : +pbTab, list = isU ? PB_UM : PB_BO;
-  var tabs = slots.map(function(k){ return [k, boilerLabelFix(userData.unit, k)]; }).concat([['u', 'Umum']]);
+  var tabs = slots.map(function(k){ return [k, boilerLabelFix(pbUnit(), k)]; }).concat([['u', 'Umum']]);
 
   html += '<div class="period-tabs" style="padding:0 16px 10px;">' + tabs.map(function(x){
     return '<button class="period-tab' + (pbTab === x[0] ? ' active' : '') + '" onclick="pbSetTab(\'' + x[0] + '\')">' + x[1] + '</button>';
@@ -12797,7 +12241,7 @@ function renderPerformance(){
         '<small style="letter-spacing:0;text-transform:none;">' + P.u + '</small></div>';
     }).join('');
     html += '<div class="ef-card"><div class="ef-card-h"><div class="ef-card-ico"><i class="fa-solid fa-fire-flame-curved"></i></div>' +
-      '<div><div class="ef-card-t">' + boilerLabelFix(userData.unit, pbTab) + '</div><div class="ef-card-s">Nilai terakhir tercatat</div></div></div>' +
+      '<div><div class="ef-card-t">' + boilerLabelFix(pbUnit(), pbTab) + '</div><div class="ef-card-s">Nilai terakhir tercatat</div></div></div>' +
       '<div class="pb-stats" style="margin-top:0;">' + cells + '</div></div>';
   }
 
@@ -12850,7 +12294,7 @@ function openPerformanceForm(){
         pbField('pb-f-steam', 'Steam Consumption', 'TPH/Ton FFB') + pbField('pb-f-bpv', 'Tekanan BPV', 'Barg') +
         pbField('pb-f-ster', 'Tekanan Kerja Max. Sterilizer', 'Barg') + '</div>' +
       '<button id="pb-submit-btn" onclick="submitPerformanceForm()" class="btn-primary-green w-full flex items-center justify-center gap-2">' +
-        '<i class="fa-solid fa-cloud-arrow-up"></i> Simpan</button>' +
+        '<i class="fa-solid fa-cloud-arrow-up"></i> Save</button>' +
     '</div>');
   pbFillForm();
 }
@@ -12901,7 +12345,7 @@ function submitPerformanceForm(){
 
   var btn = document.getElementById('pb-submit-btn'), orig = btn.innerHTML;
   btn.disabled = true;
-  btn.innerHTML = '<span class="spinner spinner-white"></span>&nbsp;Menyimpan...';
+  btn.innerHTML = '<span class="spinner spinner-white"></span>&nbsp;Saving...';
 
   google.script.run
     .withSuccessHandler(function(res){
@@ -12986,7 +12430,7 @@ function efPrefetch(unit){
     .withFailureHandler(function(err){
       _efLoading = false;
       var el = document.getElementById('ef-body');
-      if(el) el.innerHTML = '<div class="ef-card"><div class="ef-none">❌ Gagal memuat data: ' + lcEsc(err.message || '') + '</div></div>';
+      if(el) el.innerHTML = '<div class="ef-card"><div class="ef-none">❌ Gagal loading data: ' + lcEsc(err.message || '') + '</div></div>';
     })
     .getEfisiensiBoiler(unit);
 }
@@ -13284,49 +12728,6 @@ renderHODashboard = function(res){
   loadHOEfisiensi();
 };
 
-function loadHOEfisiensi(){
-  if(_hoEfCache && (Date.now() - _hoEfTime) < CACHE_TTL_MS){ renderHOEfisiensi(_hoEfCache); return; }
-  google.script.run
-    .withSuccessHandler(function(d){ _hoEfCache = d; _hoEfTime = Date.now(); renderHOEfisiensi(d); })
-    .withFailureHandler(function(){ renderHOEfisiensi(null); })
-    .getEfisiensiSummaryHO();
-}
-
-function renderHOEfisiensi(d){
-  var s = document.getElementById('ho-ef-section');
-  if(!s) return;
-  var head = '<div class="hx-head"><div><p class="hx-t">Efisiensi Boiler</p><p class="hx-s">Rata-rata hasil uji semua pabrik</p></div>' +
-             '<span class="hx-pill" onclick="openHOEfisiensiModal()">Detail ›</span></div>';
-  if(!d || d.status !== 'success' || !d.avg || !d.avg.length){
-    s.innerHTML = head + '<div class="hx-ok" style="background:#fffbeb;color:#b45309;">Belum ada data Uji Efisiensi Boiler.</div>';
-    return;
-  }
-  window._hoEfData = d;
-  var avgObj = {}; d.avg.forEach(function(a){ avgObj[a.year] = a.avg; });
-  var yrs = d.avg.map(function(a){ return a.year; });
-  var lastA = d.avg[d.avg.length - 1];
-
-  var chart = yrs.length > 1
-    ? '<div style="height:200px;position:relative;"><canvas id="ho-ef-chart"></canvas></div>'
-    : '<div class="ef-big"><b>' + lastA.avg.toFixed(1) + '%</b><small>Rata-rata tahun ' + lastA.year + '</small></div>';
-
-  s.innerHTML = head + chart +
-    '<div class="hx-row" style="margin-top:14px;gap:10px;">' +
-      '<div class="hx-st" style="flex:1;" onclick="openHOEfisiensiModal()"><span class="hx-dot" style="background:#00B4D8"></span>' +
-        '<span class="hx-st-l">Boiler teruji</span><span class="hx-st-n" style="color:#0077B6">' + d.items.length + '</span></div>' +
-      '<div class="hx-st" style="flex:1;" onclick="openHOEfisiensiModal()"><span class="hx-dot" style="background:#ee7b87"></span>' +
-        '<span class="hx-st-l">Pabrik belum uji</span><span class="hx-st-n" style="color:#dc2626">' + d.belum.length + '</span></div>' +
-    '</div>';
-
-  if(_hoEfChart){ try{ _hoEfChart.destroy(); }catch(e){} _hoEfChart = null; }
-  if(yrs.length > 1){
-    setTimeout(function(){
-      var cv = document.getElementById('ho-ef-chart');
-      if(cv) _hoEfChart = efMakeChart(cv, yrs, { data: avgObj });
-    }, 80);
-  }
-}
-
 function openHOEfisiensiModal(){
   var d = window._hoEfData; if(!d) return;
   var rows = d.items.length ? d.items.map(function(it){
@@ -13569,10 +12970,10 @@ function hoEfYearChart(cv, years, counts){
 function renderHOEfisiensi(d){
   var s = document.getElementById('ho-ef-section');
   if(!s) return;
-  var head = '<div class="hx-head"><div><p class="hx-t">Uji Efisiensi Boiler</p><p class="hx-s">Jumlah boiler yang diuji per tahun · klik bar untuk detail</p></div>' +
+  var head = '<div class="hx-head"><div><p class="hx-t">Efisiensi Boiler</p><p class="hx-s">Jumlah boiler yang diuji per tahun · klik bar untuk detail</p></div>' +
              '<span class="hx-pill" onclick="openHOEfisiensiModal()">Semua ›</span></div>';
   if(!d || d.status === 'error'){
-    s.innerHTML = head + '<div class="hx-ok" style="background:#fef2f2;color:#b91c1c;">❌ ' + lcEsc((d && d.message) || 'Gagal memuat data') +
+    s.innerHTML = head + '<div class="hx-ok" style="background:#fef2f2;color:#b91c1c;">❌ ' + lcEsc((d && d.message) || 'Gagal loading data') +
       '<br><small style="font-weight:600;">Pastikan Apps Script sudah di-Deploy ulang (versi baru).</small></div>';
     return;
   }
@@ -13672,7 +13073,7 @@ efPrefetch = function(unit){
     .withFailureHandler(function(err){
       _efLoading = false;
       var el = document.getElementById('ef-body');
-      if(el) el.innerHTML = '<div class="ef-card"><div class="ef-none">❌ Gagal memuat data: ' + lcEsc(err.message || '') + '</div></div>';
+      if(el) el.innerHTML = '<div class="ef-card"><div class="ef-none">❌ Gagal loading data: ' + lcEsc(err.message || '') + '</div></div>';
     })
     .getEfisiensiBoiler(unit);
 };
@@ -13841,7 +13242,772 @@ function evShowPlayerDetail(nama, rankIdx) {
   document.body.insertAdjacentHTML('beforeend', modalHtml);
 } 
 
+/* ═══════════════════════════════════════════════════════════
+   HO DASHBOARD v2 — tombol simpel + titik notif merah
+   (blok ini HARUS paling akhir)
+   ═══════════════════════════════════════════════════════════ */
 
+/* ── Icon baru (gaya sama dengan MP_ICO / LC_ICO) ── */
+var HO_ICO = {
+  standby:
+    '<svg class="lc-svg" viewBox="0 0 64 64">' +
+      '<rect x="14" y="16" width="7" height="11" rx="2" fill="#64748b"/>' +
+      '<rect x="8" y="26" width="42" height="26" rx="12" fill="#0077B6"/>' +
+      '<rect x="6" y="52" width="46" height="5" rx="2.5" fill="#03045e"/>' +
+      '<rect x="23" y="35" width="5" height="12" rx="2" fill="#fff"/>' +
+      '<rect x="32" y="35" width="5" height="12" rx="2" fill="#fff"/>' +
+      '<text class="mp-twinkle" x="46" y="21" font-size="14" font-weight="800" fill="#f59e0b" font-family="Arial">z</text>' +
+      '<text class="mp-twinkle" style="animation-delay:.9s" x="53" y="11" font-size="10" font-weight="800" fill="#00B4D8" font-family="Arial">z</text>' +
+    '</svg>',
+  review:
+    '<svg class="lc-svg" viewBox="0 0 64 64">' +
+      '<rect x="8" y="6" width="38" height="48" rx="6" fill="#e0f4ff" stroke="#0077B6" stroke-width="2.5"/>' +
+      '<path d="M16 18h22M16 26h22M16 34h12" stroke="#90c8f0" stroke-width="3" stroke-linecap="round"/>' +
+      '<circle class="mp-pulse" cx="44" cy="44" r="13" fill="rgba(245,158,11,.3)"/>' +
+      '<circle cx="44" cy="44" r="10" fill="#f59e0b" stroke="#fff" stroke-width="2"/>' +
+      '<path d="M44 38v6l4 3" fill="none" stroke="#fff" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/>' +
+    '</svg>',
+  assess:
+    '<svg class="lc-svg" viewBox="0 0 64 64">' +
+      '<rect x="8" y="9" width="40" height="49" rx="6" fill="#e0f4ff" stroke="#0077B6" stroke-width="2.5"/>' +
+      '<rect x="19" y="4" width="18" height="9" rx="3" fill="#03045e"/>' +
+      '<path class="mp-check" d="M15 24l3 3l6-6" fill="none" stroke="#00B4D8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path class="mp-check" style="animation-delay:.4s" d="M15 36l3 3l6-6" fill="none" stroke="#00B4D8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path class="mp-check" style="animation-delay:.8s" d="M15 48l3 3l6-6" fill="none" stroke="#00B4D8" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>' +
+      '<path d="M30 25h13M30 37h13M30 49h9" stroke="#90c8f0" stroke-width="3" stroke-linecap="round"/>' +
+      '<circle class="mp-pulse" cx="50" cy="48" r="9" fill="rgba(245,158,11,.35)"/>' +
+      '<path d="M50 41l2 4.2l4.6.6l-3.3 3.2l.8 4.6L50 51.4l-4.1 2.2l.8-4.6l-3.3-3.2l4.6-.6z" fill="#f59e0b"/>' +
+    '</svg>'
+};
+
+/* ── Daftar tombol dashboard HO ── */
+var HO_TILES = [
+  { g:'Status & Dokumen', it:[
+    { k:'hl',    t:'Heatloss',         s:MP_ICO.thermal },
+    { k:'riksa', t:'Riksa Uji',        s:MP_ICO.riksa },
+    { k:'sim',   t:'Simulasi Darurat', s:MP_ICO.sim },
+    { k:'rv',    t:'Review Dokumen',   s:HO_ICO.review }
+  ]},
+  { g:'Boiler', it:[
+    { k:'hm', t:'HM Inspeksi',        s:LC_ICO.ops },
+    { k:'bd', t:'Breakdown Pabrik',   s:LC_ICO.boiler },
+    { k:'ef', t:'Efisiensi Boiler',   s:MP_ICO.efisiensi },
+    { k:'pf', t:'Performance Boiler', s:MP_ICO.performance },
+    { k:'sb', t:'Boiler Standby',     s:HO_ICO.standby }
+  ]},
+  { g:'Water Quality', it:[
+    { k:'wi', t:'WTP Internal',  s:MP_ICO.wtpInt },
+    { k:'we', t:'WTP Eksternal', s:MP_ICO.wtpExt }
+  ]},
+  { g:'Learning', it:[
+    { k:'as', t:'Assessment SOP & IK', s:HO_ICO.assess }
+  ]}
+];
+
+var HO_SPIN = '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>';
+
+/* ── Halaman penuh khusus HO (tanpa bottom nav) ── */
+function hoOpenPage(title, eyebrow, body, back){
+  closeMenuPages();
+  document.body.insertAdjacentHTML('beforeend',
+    '<div id="ho-sub-page" class="mp-page">' +
+      '<div class="mp-head">' +
+        '<button class="mp-back" onclick="' + (back || 'hoClosePage()') + '"><i class="fa-solid fa-arrow-left"></i></button>' +
+        '<div style="position:relative;z-index:1;"><p class="mp-eyebrow">' + eyebrow + '</p><h2 class="mp-title">' + title + '</h2></div>' +
+      '</div>' +
+      '<div style="padding-top:20px;">' + body + '</div>' +
+    '</div>');
+  var pg = document.getElementById('ho-sub-page'); if(pg) pg.scrollTop = 0;
+}
+function hoClosePage(){ pbViewUnit = null; closeMenuPages(); hoRefreshDots(); }
+
+/* ── Section yang dibuka dari tombol (pakai renderer lama, id section sama) ── */
+var HO_SEC = {
+  bd:{ t:'Breakdown Pabrik',      id:'ho-utilitas-section', c:'ho-assess-wrap', run:function(){ if(_hoUtilCache)     renderHOUtilitasDonut(_hoUtilCache); } },
+  hm:{ t:'HM Inspeksi Boiler',    id:'ho-hm-section',       c:'ho-assess-wrap', run:function(){ if(_hoHMCache)       renderHOHMDonut(_hoHMCache); } },
+  ef:{ t:'Efisiensi Boiler',      id:'ho-ef-section',       c:'ho-assess-wrap', run:function(){ loadHOEfisiensi(); } },
+  sb:{ t:'Boiler Standby',        id:'ho-standby-section',  c:'ho-assess-wrap', run:function(){ if(_hoStandbyCache)  renderHOStandby(_hoStandbyCache); } },
+  wi:{ t:'WTP Internal',          id:'ho-wtp-section',      c:'dk-card',        run:function(){ if(_hoWtpCache)      renderHOWtpDonuts(_hoWtpCache); } },
+  we:{ t:'WTP Eksternal',         id:'ho-wtpext-section',   c:'ho-assess-wrap', run:function(){ if(_hoWtpExtCache)   renderHOWtpExtDonuts(_hoWtpExtCache); } },
+  as:{ t:'Assessment SOP & IK',   id:'ho-assess-section',   c:'ho-assess-wrap', run:function(){ if(_hoAssessCache)   renderHOAssessment(_hoAssessCache); } }
+};
+function hoOpenSection(k){
+  var s = HO_SEC[k]; if(!s) return;
+  hoOpenPage(s.t, 'Head Office',
+    '<div class="' + s.c + '" id="' + s.id + '" style="margin:0 16px 16px;">' + HO_SPIN + '</div>');
+  s.run();
+}
+
+/* ── Hitung titik notif (logika sama dgn user: expired / perhatian / belum diisi) ── */
+function hoBelowUnitCount(params){
+  var seen = {};
+  Object.keys(params || {}).forEach(function(k){
+    (params[k].belowUnits || []).forEach(function(u){ seen[u.unit] = 1; });
+  });
+  return Object.keys(seen).length;
+}
+function hoAssBelum(all){
+  var latest = 0;
+  (all || []).forEach(function(d){ var y = parseInt(d.tahun, 10) || 0; if(y > latest) latest = y; });
+  var ikut = {};
+  (all || []).forEach(function(d){ if(parseInt(d.tahun, 10) === latest) ikut[String(d.pabrik || '').toUpperCase()] = 1; });
+  return UNITS.filter(function(u){
+    return u !== 'Head office' && !u.toUpperCase().endsWith('B') && !ikut[u.toUpperCase()];
+  }).length;
+}
+
+/* ── Dashboard HO: grid tombol ── */
+renderHODashboard = function(res){
+  var el = document.getElementById('ho-content'); if(!el) return;
+
+  // BKPM hanya 1 shift (sama seperti versi lama)
+  var simItems = res.simItems || [];
+  if(simItems.some(function(i){ return String(i.unit).toUpperCase() === 'BKPM' && /2/.test(i.shift); })){
+    simItems = simItems.filter(function(i){ return !(String(i.unit).toUpperCase() === 'BKPM' && /2/.test(i.shift)); });
+    var sim = { aktif:0, belum:0, expired:0 };
+    simItems.forEach(function(i){ if(sim[i.status] !== undefined) sim[i.status]++; });
+    res.simItems = simItems;
+    if(res.summary) res.summary.sim = sim;
+  }
+
+  var html = '';
+  if(res.generated) html += '<p style="font-size:11px;color:#94a3b8;font-weight:600;margin:0 0 2px;">🕐 Update: ' + res.generated + '</p>';
+
+  HO_TILES.forEach(function(g){
+    html += '<h3 class="sec-h" style="margin:18px 0 0;">' + g.g + '</h3><div class="mp-grid" style="padding:16px 0 4px;gap:20px 8px;">';
+    g.it.forEach(function(x, i){
+      html += '<div class="lc-as2 info" style="animation-delay:' + (i * 50) + 'ms" onclick="hoGo(\'' + x.k + '\')">' +
+        '<div class="lc-as2-ico" data-ho="' + x.k + '">' + x.s + '</div>' +
+        '<div class="lc-as2-t">' + x.t + '</div></div>';
+    });
+    html += '</div>';
+  });
+
+  html += '<button onclick="loadDataHO(true)" style="width:100%;padding:14px;background:var(--primary-dark);border:none;border-radius:16px;color:white;font-weight:700;font-size:14px;cursor:pointer;font-family:\'Plus Jakarta Sans\',sans-serif;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:22px;">' +
+    '<i class="fa-solid fa-rotate-right"></i> Refresh Data</button>';
+
+  el.innerHTML = html;
+  hoRefreshDots();
+  loadHOEfisiensi();
+  window._hoToastPending = true;
+  hoRefreshDots();
+  loadHOPerformance();
+};
+
+/* ── Titik notif ikut update setiap data masuk ── */
+['renderHOUtilitasDonut','renderHOHMDonut','renderHOWtpDonuts','renderHOWtpExtDonuts',
+ 'renderHOStandby','renderHOEfisiensi'].forEach(function(n){
+  var f = window[n];
+  window[n] = function(){
+    var r = f.apply(this, arguments);
+    try{ hoRefreshDots(); }catch(e){}
+    return r;
+  };
+});
+var _hoAssW = renderHOAssessment;
+renderHOAssessment = function(all){
+  window._hoAssAll = all;                 // wajib: dipakai openHOAssessmentList walau section belum terbuka
+  _hoAssW(all);
+  try{ hoRefreshDots(); }catch(e){}
+};
+
+/* ── Review dokumen (dulu banner, sekarang tombol + modal) ── */
+function openHOPendingModal(){
+  var items = (window._hoPending || []).slice();
+  if(!items.length){
+    hxModal('ho-pending-modal', 'Review Dokumen', 'Tidak ada',
+      '<div class="hx-ok" style="margin-top:14px;">✅ Tidak ada dokumen menunggu review.</div>');
+    return;
+  }
+  items.sort(function(a, b){ return String(a.pabrik).localeCompare(String(b.pabrik)); });
+  var units = {}; items.forEach(function(i){ units[i.pabrik] = 1; });
+  var rows = items.map(function(item){
+    var tipe = item.tipe === 'heatloss' ? '🌡️ Heatloss' : '📋 Riksa';
+    var bl   = /^boiler\s/i.test(item.boiler) ? item.boiler : 'Boiler ' + item.boiler;
+    return '<div class="hx-li hm-searchable-row" style="cursor:default;"><div class="hx-li-m">' +
+      '<div class="hx-li-n">' + lcEsc(item.pabrik) + ' · ' + tipe + ' · ' + lcEsc(bl) + '</div>' +
+      '<div class="hx-li-d">' + lcEsc(item.timestamp) + ' · by ' + lcEsc(item.email || '—') + '</div></div>' +
+      (item.fileUrl
+        ? '<a href="' + item.fileUrl + '" target="_blank" style="padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;background:#0077B6;color:white;text-decoration:none;">Review ›</a>'
+        : '<span style="font-size:11px;color:#94a3b8;">No file</span>') +
+    '</div>';
+  }).join('');
+  hxModal('ho-pending-modal', 'Review Dokumen',
+    items.length + ' dokumen dari ' + Object.keys(units).length + ' unit',
+    hmSearchBarHtml('ho-pending-list', 'Cari unit / boiler...') +
+    '<div id="ho-pending-list" style="padding:0 0 30px;">' + rows + '</div>');
+}
+
+/* ── Performance Boiler: rekap HO ── */
+var _hoPfCache = null, _hoPfTime = 0;
+var pbViewUnit = null;
+function pbUnit(){ return pbViewUnit || (userData && userData.unit) || ''; }
+
+function hoOpenPerformanceUnit(unit){
+  var m = document.getElementById('ho-pf-modal'); if(m) m.remove();
+  pbViewUnit = unit; pbData = null; pbTab = null;
+  hoOpenPage('Performance · ' + unit, 'Head Office', '<div id="pb-body"></div>', 'hoPerfBack()');
+  renderPerformance();
+  google.script.run
+    .withSuccessHandler(function(res){ if(pbViewUnit !== unit) return; pbData = res; renderPerformance(); })
+    .withFailureHandler(function(e){ if(pbViewUnit !== unit) return; pbData = { status:'error', message:e.message }; renderPerformance(); })
+    .getPerformanceData(unit);
+}
+function hoPerfBack(){ pbViewUnit = null; pbData = null; closeMenuPages(); openHOPerformanceList(); }
+
+
+/* ═══════════════════════════════════════════════════════════
+   HO v3 — tombol langsung ke PAGE + WTP pie + toast
+   (HARUS paling akhir)
+   ═══════════════════════════════════════════════════════════ */
+
+function hoGo(k){
+  if(k === 'hl' || k === 'riksa' || k === 'sim') return hoOpenCategoryPage(k);
+  if(k === 'rv') return openHOPendingPage();
+  if(k === 'pf') return openHOPerformanceList();
+  hoOpenSection(k);
+}
+
+/* ── Heatloss / Riksa / Simulasi: page ── */
+var HO_CAT_T = { hl:'Heatloss', riksa:'Riksa Uji', sim:'Simulasi Darurat' };
+var HO_CAT_LBL = { aktif:'Aktif', perhatian:'Perhatian', expired:'Expired', belum:'Belum' };
+var HO_CAT_BADGE = {
+  aktif:'background:#e0f4ff;color:#005f92;', perhatian:'background:#fef3c7;color:#b45309;',
+  expired:'background:#fee2e2;color:#dc2626;', belum:'background:#f1f5f9;color:#64748b;'
+};
+
+function hoOpenCategoryPage(type){
+  if(!hoRawData || !hoRawData.summary){ showToast('Data belum siap, coba lagi sebentar'); return; }
+  var s = hoRawData.summary[type] || {};
+  var order = (type === 'sim') ? ['aktif','belum','expired'] : ['aktif','perhatian','expired'];
+  var first = ['expired', order[1], 'aktif'].filter(function(k){ return (s[k] || 0) > 0; })[0] || 'aktif';
+  hoOpenPage(HO_CAT_T[type], 'Head Office', '<div id="ho-cat-wrap" style="padding:0 16px 20px;"></div>');
+  hoCatRender(type, first);
+}
+
+/* ── Review Dokumen: page ── */
+function openHOPendingPage(){
+  var items = (window._hoPending || []).slice();
+  var units = {}; items.forEach(function(i){ units[i.pabrik] = 1; });
+  items.sort(function(a, b){ return String(a.pabrik).localeCompare(String(b.pabrik)); });
+
+  var rows = items.map(function(item){
+    var tipe = item.tipe === 'heatloss' ? '🌡️ Heatloss' : '📋 Riksa';
+    var bl   = /^boiler\s/i.test(item.boiler) ? item.boiler : 'Boiler ' + item.boiler;
+    return '<div class="hx-li hm-searchable-row" style="cursor:default;"><div class="hx-li-m">' +
+      '<div class="hx-li-n">' + lcEsc(item.pabrik) + ' · ' + tipe + ' · ' + lcEsc(bl) + '</div>' +
+      '<div class="hx-li-d">' + lcEsc(item.timestamp) + ' · by ' + lcEsc(item.email || '—') + '</div></div>' +
+      (item.fileUrl
+        ? '<a href="' + item.fileUrl + '" target="_blank" style="padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;background:#0077B6;color:white;text-decoration:none;">Review ›</a>'
+        : '<span style="font-size:11px;color:#94a3b8;">No file</span>') + '</div>';
+  }).join('');
+
+  hoOpenPage('Review Dokumen', 'Head Office',
+    '<div style="padding:0 16px 20px;"><div class="ice-card">' +
+      (items.length
+        ? '<p class="hx-sub">' + items.length + ' dokumen dari ' + Object.keys(units).length + ' unit</p>' +
+          hmSearchBarHtml('ho-pend-list', 'Cari unit / boiler...') + '<div id="ho-pend-list">' + rows + '</div>'
+        : '<div class="hx-ok">✅ Tidak ada dokumen menunggu review.</div>') +
+    '</div></div>');
+}
+
+/* ── Performance Boiler: list unit sebagai page ── */
+function loadHOPerformance(force){
+  if(!force && _hoPfCache && _hoPfCache.status === 'success' && (Date.now() - _hoPfTime) < CACHE_TTL_MS){
+    hoRefreshDots(); return;
+  }
+  google.script.run
+    .withSuccessHandler(function(d){
+      _hoPfCache = d; _hoPfTime = Date.now(); hoRefreshDots();
+      if(document.getElementById('ho-pf-wrap')) openHOPerformanceList(true);
+    })
+    .withFailureHandler(function(e){
+      _hoPfCache = { status:'error', message:(e && e.message) || 'Gagal terhubung ke server' };
+      if(document.getElementById('ho-pf-wrap')) openHOPerformanceList(true);
+    })
+    .getPerformanceSummaryHO();
+}
+function hoPfRetry(){ _hoPfCache = null; openHOPerformanceList(true); }
+
+function openHOPerformanceList(inPlace){
+  var wrap = document.getElementById('ho-pf-wrap');
+  if(inPlace !== true || !wrap){
+    hoOpenPage('Performance Boiler', 'Head Office', '<div id="ho-pf-wrap" style="padding:0 16px 20px;"></div>');
+    wrap = document.getElementById('ho-pf-wrap');
+  }
+  var d = _hoPfCache;
+  if(!d){ wrap.innerHTML = HO_SPIN; loadHOPerformance(true); return; }
+  if(d.status !== 'success'){
+    wrap.innerHTML = '<div class="ef-none">❌ ' + lcEsc(d.message || 'Gagal loading data') + '</div>' +
+      '<button class="pb-btn" style="margin-top:12px;width:100%;padding:13px;" onclick="hoPfRetry()">Retry</button>';
+    return;
+  }
+  function row(u, ok){
+    return '<div class="hx-li hm-searchable-row" onclick="hoOpenPerformanceUnit(\'' + u.unit + '\')">' +
+      '<div class="hx-li-m"><div class="hx-li-n">' + lcEsc(u.unit) + '</div>' +
+      '<div class="hx-li-d">' + (u.last ? 'Data terakhir ' + u.last : 'Belum pernah diisi') + '</div></div>' +
+      '<span class="badge ' + (ok ? 'b-green' : 'b-red') + '">' + (ok ? 'Sudah' : 'Belum') + '</span>' +
+      '<span style="color:#cbd5e1;">›</span></div>';
+  }
+  var belum = d.belum.map(function(u){ return row(u, false); }).join('') || '<div class="hx-ok">✅ Semua unit sudah mengisi.</div>';
+  var sudah = d.sudah.map(function(u){ return row(u, true); }).join('') || '<p style="color:#94a3b8;font-size:13px;padding:8px 0;">Belum ada.</p>';
+  wrap.innerHTML = '<div class="ice-card">' +
+    '<p class="hx-s" style="margin:0 0 8px;">Data ' + d.target.label + ' · ' + d.sudah.length + ' sudah · ' + d.belum.length + ' belum · klik unit untuk detail</p>' +
+    hmSearchBarHtml('ho-pf-list', 'Cari unit...') +
+    '<div id="ho-pf-list">' +
+      '<p class="hx-sub" style="color:#dc2626;margin-top:6px;">Belum mengisi (' + d.belum.length + ')</p>' + belum +
+      '<p class="hx-sub" style="color:#0077B6;margin-top:18px;">Sudah mengisi (' + d.sudah.length + ')</p>' + sudah +
+    '</div></div>';
+}
+
+/* ── WTP Internal: PIE, style sama dgn donut "Summary Status Keseluruhan" ── */
+function renderHOWtpDonuts(res){
+  if(res && res.status === 'success' && res.params) window._hoWtpParams = res.params;
+  var section = document.getElementById('ho-wtp-section');
+  if(!section) return;
+  var title = '<p class="dk-title">Water Quality · Parameter Air WTP — Semua Unit</p>';
+
+  if(!res || res.status !== 'success' || !res.params){
+    section.innerHTML = title + '<p style="color:rgba(255,255,255,.65);font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
+    return;
+  }
+  var ORDER = ['pH','M-Alk','Silica','O-Alk/Silica','Sulfite','TDS','Phosphate'];
+  var labels = ORDER.filter(function(l){ return res.params.hasOwnProperty(l); });
+
+  var html = title + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px 10px;">';
+  labels.forEach(function(lbl, i){
+    var d = res.params[lbl], n = d.normalUnits.length, b = d.belowUnits.length, t = n + b;
+    var pct = t ? Math.round(n / t * 100) : 0;
+    html +=
+      '<div style="text-align:center;cursor:pointer;" onclick="openWtpHODetailModal(\'' + lbl.replace(/'/g, "\\'") + '\')">' +
+        '<p style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;">' + lbl + '</p>' +
+        '<div style="position:relative;display:inline-block;width:100%;max-width:100px;aspect-ratio:1/1;">' +
+          '<canvas id="wtp-ho-pie-' + i + '" style="width:100%;height:100%;display:block;"></canvas>' +
+        '</div>' +
+        '<p style="font-size:15px;font-weight:900;color:var(--text-1);margin:6px 0 0;line-height:1;">' + pct + '%</p>' +
+        '<div style="margin-top:6px;display:flex;justify-content:center;gap:7px;flex-wrap:wrap;">' +
+          hoLegendInline('#00B4D8', 'Normal', n) + hoLegendInline('#ef4444', 'Di bawah', b) +
+        '</div>' +
+      '</div>';
+  });
+  html += '</div><p style="font-size:10px;color:rgba(255,255,255,.4);margin:14px 0 0;text-align:center;">Tap untuk detail ›</p>';
+  section.innerHTML = html;
+
+  setTimeout(function(){
+    Chart.defaults.font.family = WTP_FONT;
+    labels.forEach(function(lbl, i){
+      var cv = document.getElementById('wtp-ho-pie-' + i); if(!cv) return;
+      var d = res.params[lbl], n = d.normalUnits.length, b = d.belowUnits.length, has = (n + b) > 0;
+      if(Chart.getChart && Chart.getChart(cv)) Chart.getChart(cv).destroy();
+      new Chart(cv.getContext('2d'), {
+        type: 'pie',
+        data: { labels:['Normal','Di bawah standar'], datasets:[{
+          data: has ? [n, b] : [1],
+          backgroundColor: has ? ['#00B4D8', '#ef4444'] : ['#e2e8f0'],
+          borderWidth: 0, borderRadius: 12, spacing: (n > 0 && b > 0) ? 3 : 0, hoverOffset: 4 }] },
+        options: {
+          maintainAspectRatio: true,
+          plugins: {
+            legend: { display: false },
+            tooltip: { enabled: has, backgroundColor: 'rgba(3,4,94,.96)', padding: 12, cornerRadius: 12,
+              callbacks: { label: function(c){ return ' ' + c.label + ': ' + c.parsed + ' unit'; } } }
+          },
+          animation: { duration: 600 }
+        }
+      });
+    });
+  }, 80);
+}
+
+/* ═══════════════════════════════════════════════════════════
+   HO v4 — donut kategori, toast review, notif assessment per orang,
+   Assessment & WTP tampil inline (tanpa modal)
+   (HARUS paling akhir)
+   ═══════════════════════════════════════════════════════════ */
+
+/* ── 0. Toast bisa diklik (onclick di-reset tiap toast baru) ── */
+function showToast(msg,dur){
+  dur=dur||2800;
+  var t=document.getElementById('toast');
+  t.onclick=null; t.style.cursor='';
+  t.textContent=msg;t.style.display='block';
+  clearTimeout(t._t);t._t=setTimeout(function(){t.style.display='none';},dur);
+}
+
+/* ── 1. Assessment: daftar ORANG yang belum lulus (rata-rata < 90, nilai kosong dihitung 0) ── */
+function hoAssPersons(all){
+  var latest=0;
+  (all||[]).forEach(function(d){ var y=parseInt(d.tahun,10)||0; if(y>latest) latest=y; });
+  var out=[];
+  (all||[]).forEach(function(d){
+    if(parseInt(d.tahun,10)!==latest) return;
+    if(String(d.pabrik||'').toUpperCase()==='HEAD OFFICE') return;
+    var t=0,kosong=0,bad=0;
+    for(var i=0;i<7;i++){
+      var v=parseFloat(d.nilai&&d.nilai[i])||0;
+      t+=v; if(!v) kosong++; if(v<90) bad++;
+    }
+    if(bad>0) out.push({nama:d.nama||'—',unit:d.pabrik||'—',avg:Math.round(t/7),kosong:kosong,bad:bad});
+  });
+  return out;
+}
+
+/* ── 2. Hitung titik notif (assessment = jumlah ORANG) ── */
+function hoCounts(){
+  var c={}, s=hoRawData&&hoRawData.summary;
+  if(s){
+    c.hl    =((s.hl   ||{}).perhatian||0)+((s.hl   ||{}).expired||0);
+    c.riksa =((s.riksa||{}).perhatian||0)+((s.riksa||{}).expired||0);
+    c.sim   =((s.sim  ||{}).belum    ||0)+((s.sim  ||{}).expired||0);
+  }
+  c.rv=(window._hoPending||[]).length;
+  if(_hoHMCache      && _hoHMCache.status     ==='success') c.hm=(_hoHMCache.lewat||[]).length;
+  if(_hoUtilCache    && _hoUtilCache.status   ==='success') c.bd=(_hoUtilCache.belowUnits||[]).length;
+  if(_hoEfCache      && _hoEfCache.status     ==='success') c.ef=(_hoEfCache.belum||[]).length;
+  if(_hoPfCache      && _hoPfCache.status     ==='success') c.pf=(_hoPfCache.belum||[]).length;
+  if(_hoStandbyCache && _hoStandbyCache.status==='success') c.sb=(_hoStandbyCache.belum||[]).length;
+  if(_hoWtpCache     && _hoWtpCache.status    ==='success') c.wi=hoBelowUnitCount(_hoWtpCache.params);
+  if(_hoWtpExtCache  && _hoWtpExtCache.status ==='success') c.we=hoBelowUnitCount(_hoWtpExtCache.params);
+  if(Array.isArray(_hoAssessCache)) c.as=hoAssPersons(_hoAssessCache).length;
+  return c;
+}
+
+/* ── 3. Refresh titik merah (toast umum dihapus, diganti toast review) ── */
+function hoRefreshDots(){
+  var c=hoCounts(), total=0;
+  document.querySelectorAll('[data-ho]').forEach(function(el){
+    var n=c[el.getAttribute('data-ho')]||0;
+    var old=el.querySelector('.nd'); if(old) old.remove();
+    if(n>0) el.insertAdjacentHTML('beforeend', ndBadge(n));
+  });
+  Object.keys(c).forEach(function(k){ total+=c[k]||0; });
+  var b=document.getElementById('ho-bell-n'); if(b) b.innerHTML=ndBadge(total);
+  window._hoCounts=c;
+}
+
+/* ── 4. Toast khusus review dokumen (muncul di header atas, bisa diklik) ── */
+function renderPendingBannerHO(items){
+  window._hoPending=items||[];
+  try{ hoRefreshDots(); }catch(e){}
+  var n=window._hoPending.length;
+  var pg=document.getElementById('pg-ho');
+  if(n>0 && pg && pg.classList.contains('active')){
+    showToast('⏳ '+n+' dokumen menunggu review · ketuk untuk membuka',6000);
+    var t=document.getElementById('toast');
+    t.style.cursor='pointer';
+    t.onclick=function(){ t.style.display='none'; openHOPendingPage(); };
+  }
+}
+
+/* ── 5. Daftar notifikasi HO (assessment = 1 notif per orang) ── */
+function openHONotifModal(){
+  var c=hoCounts();
+  var P=(_hoPfCache&&_hoPfCache.target)?_hoPfCache.target.label:'bulan lalu';
+  var D=[
+    {k:'rv',   ic:'⏳', t:'Dokumen Menunggu Review',s:'perhatian',      d:function(n){return n+' dokumen belum direview Tim Boiler Inspection.';}},
+    {k:'hl',   ic:'🌡️',t:'Heatloss',               s:'expired',        d:function(n){return n+' boiler heatloss sudah expired / hampir habis.';}},
+    {k:'riksa',ic:'📋', t:'Riksa Uji',              s:'expired',        d:function(n){return n+' sertifikat riksa uji expired / hampir habis.';}},
+    {k:'sim',  ic:'⚠️',t:'Simulasi Darurat',       s:'expired',        d:function(n){return n+' shift belum dilakukan / sudah expired.';}},
+    {k:'hm',   ic:'🔥', t:'HM Inspeksi',            s:'expired',        d:function(n){return n+' boiler sudah melewati batas 5.000 jam.';}},
+    {k:'bd',   ic:'🏭', t:'Breakdown Pabrik',       s:'perhatian',      d:function(n){return n+' pabrik di bawah target 95%.';}},
+    {k:'wi',   ic:'💧', t:'WTP Internal',           s:'diluar_standard',d:function(n){return n+' unit punya parameter di bawah standar.';}},
+    {k:'we',   ic:'💧', t:'WTP Eksternal',          s:'diluar_standard',d:function(n){return n+' unit punya parameter di bawah standar.';}},
+    {k:'ef',   ic:'📊', t:'Efisiensi Boiler',       s:'belum',          d:function(n){return n+' pabrik belum memiliki data efisiensi boiler.';}},
+    {k:'pf',   ic:'📈', t:'Performance Boiler',     s:'belum',          d:function(n){return n+' unit belum mengisi data '+P+'.';}},
+    {k:'sb',   ic:'⏸️',t:'Boiler Standby',         s:'belum',          d:function(n){return n+' unit belum mengisi form pada siklus ini.';}}
+  ].filter(function(x){ return (c[x.k]||0)>0; });
+
+  var items=D.map(function(x){ return {k:x.k,ic:x.ic,t:x.t,d:x.d(c[x.k]),s:x.s}; });
+  if(Array.isArray(_hoAssessCache)){
+    hoAssPersons(_hoAssessCache).forEach(function(p){
+      items.push({k:'as',ic:'📝',t:'Assessment · '+p.nama,s:'belum',
+        d:p.unit+' · '+p.bad+' modul belum lulus'+(p.kosong?' ('+p.kosong+' belum dikerjakan)':'')});
+    });
+  }
+  var body;
+  if(!items.length){
+    body='<div style="padding:40px 20px;text-align:center;color:#0077B6;font-weight:700;font-size:14px;">✅ Tidak ada notifikasi. Semua aman.</div>';
+  }else{
+    body='<div style="background:#e6f6ff;padding:14px 12px 30px;">'+items.map(function(x){
+      var col=NOTIF_COL[x.s]||'#64748b';
+      return '<div onclick="document.getElementById(\'ho-notif-modal\').remove();hoGo(\''+x.k+'\')" '+
+        'style="max-width:92%;background:#fff;border-radius:4px 16px 16px 16px;padding:10px 13px;margin-bottom:10px;'+
+        'border-left:4px solid '+col+';box-shadow:0 1px 2px rgba(0,0,0,.1);cursor:pointer;">'+
+        '<div style="font-size:13px;font-weight:800;color:#03045e;">'+x.ic+' '+lcEsc(x.t)+'</div>'+
+        '<div style="font-size:12px;color:#475569;margin-top:3px;line-height:1.5;">'+lcEsc(x.d)+'</div></div>';
+    }).join('')+'</div>';
+  }
+  hxModal('ho-notif-modal','Notifikasi',items.length+' notifikasi',body);
+}
+
+/* ── 6. Heatloss / Riksa / Simulasi: DONUT di atas card angka ── */
+function hoCatRender(type,status){
+  var wrap=document.getElementById('ho-cat-wrap'); if(!wrap||!hoRawData) return;
+  var s=hoRawData.summary[type]||{};
+  var isSim=(type==='sim');
+  var order=isSim?['aktif','belum','expired']:['aktif','perhatian','expired'];
+  var cols =isSim?['#00B4D8','#94a3b8','#ef4444']:['#00B4D8','#f59e0b','#ef4444'];
+  var a=s[order[0]]||0, p=s[order[1]]||0, e=s[order[2]]||0, tot=a+p+e;
+  var pct=tot?Math.round(a/tot*100):0;
+
+  var legend=order.map(function(k,i){ return hoLegendInline(cols[i],HO_CAT_LBL[k],s[k]||0); }).join('');
+  var donut=
+    '<div class="ice-card" style="margin-bottom:14px;text-align:center;">'+
+      '<div class="hx-ring" style="margin:0 auto;width:150px;height:150px;cursor:default;">'+
+        '<canvas id="ho-cat-donut"></canvas>'+
+        '<div class="hx-ring-c"><b>'+pct+'%</b><span>Aktif · '+tot+' total</span></div>'+
+      '</div>'+
+      '<div style="margin-top:10px;display:flex;justify-content:center;gap:10px;flex-wrap:wrap;">'+legend+'</div>'+
+    '</div>';
+
+  var tiles=order.map(function(k){
+    var cls=(k==='aktif')?'aktif':(k==='expired')?'expired':'perhatian';
+    return '<div class="ho-stat-card '+cls+'" onclick="hoCatRender(\''+type+'\',\''+k+'\')" '+
+      'style="'+(k===status?'box-shadow:0 0 0 2px var(--accent),var(--shadow-sm);':'')+'">'+
+      '<div class="ho-stat-num '+cls+'">'+(s[k]||0)+'</div>'+
+      '<div class="ho-stat-lbl">'+HO_CAT_LBL[k]+'</div></div>';
+  }).join('');
+
+  var src=(type==='hl')?hoRawData.hlItems:(type==='riksa')?hoRawData.riksaItems:hoRawData.simItems;
+  var items=(src||[]).filter(function(i){ return i.status===status; });
+  items.sort(function(a,b){
+    var u=String(a.unit).localeCompare(String(b.unit)); if(u) return u;
+    return String(a.boiler||a.shift||'').localeCompare(String(b.boiler||b.shift||''),'id',{numeric:true});
+  });
+  var rows=items.map(function(it){
+    var nama=(type==='hl')?boilerLabelFix(it.unit,it.boiler):(type==='riksa')?boilerNoFix(it.unit,it.boiler):it.shift;
+    var sisa='';
+    if(it.daysLeft!==null&&it.daysLeft!==undefined) sisa=it.daysLeft<0?' · '+Math.abs(it.daysLeft)+'h lalu':' · sisa '+it.daysLeft+'h';
+    return '<div class="hx-li hm-searchable-row" style="cursor:default;"><div class="hx-li-m">'+
+      '<div class="hx-li-n">'+lcEsc(it.unit)+' · '+lcEsc(nama)+'</div>'+
+      '<div class="hx-li-d">'+(it.tgl?'📅 '+fmtDate(it.tgl):'Belum ada tanggal')+(it.expiry?' · ⏰ '+fmtDate(it.expiry):'')+sisa+'</div></div>'+
+      '<span class="badge" style="'+HO_CAT_BADGE[it.status]+'">'+HO_CAT_LBL[it.status]+'</span></div>';
+  }).join('')||'<p style="color:#94a3b8;font-size:13px;text-align:center;padding:24px 0;">Tidak ada data dengan status ini.</p>';
+
+  wrap.innerHTML=donut+
+    '<div class="ho-stat-row" style="margin-bottom:14px;">'+tiles+'</div>'+
+    '<div class="ice-card">'+
+      '<p class="hx-sub">'+HO_CAT_LBL[status]+' · '+items.length+' item</p>'+
+      hmSearchBarHtml('ho-cat-list','Cari unit / boiler...')+
+      '<div id="ho-cat-list">'+rows+'</div>'+
+    '</div>';
+
+  setTimeout(function(){ drawHODonut('ho-cat-donut',a,p,e,isSim); },50);
+}
+
+/* ── 7. Assessment: donut + daftar detail LANGSUNG di bawahnya (tanpa modal) ── */
+renderHOAssessment=function(all){
+  window._hoAssAll=all;
+  var section=document.getElementById('ho-assess-section');
+  if(!section){ try{hoRefreshDots();}catch(e){} return; }
+
+  var head=function(sub){
+    return '<div class="hx-head"><div><p class="hx-t">Assessment SOP &amp; IK</p><p class="hx-s">'+sub+'</p></div></div>';
+  };
+  if(!all||!all.length){
+    section.innerHTML=head('Status lulus per unit')+'<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Belum ada data assessment.</p>';
+    hoRefreshDots(); return;
+  }
+
+  var latest=all.reduce(function(m,d){ var y=parseInt(d.tahun,10)||0; return y>m?y:m; },0);
+  var map={};
+  all.filter(function(d){ return parseInt(d.tahun,10)===latest; }).forEach(function(d){
+    var u=d.pabrik||'—',t=0;
+    for(var i=0;i<7;i++) t+=parseFloat(d.nilai&&d.nilai[i])||0;
+    var avg=Math.round(t/7);
+    if(!map[u]) map[u]={t:0,c:0};
+    map[u].t+=avg; map[u].c++;
+  });
+  var lulus=0,belumLulus=0;
+  Object.keys(map).forEach(function(u){ (Math.round(map[u].t/map[u].c)>=90)?lulus++:belumLulus++; });
+  var known=UNITS.filter(function(u){ return u!=='Head office'&&!u.toUpperCase().endsWith('B'); });
+  var ikut=Object.keys(map).map(function(u){ return u.toUpperCase(); });
+  var belumAss=known.filter(function(u){ return ikut.indexOf(u.toUpperCase())===-1; }).length;
+  var total=lulus+belumLulus+belumAss;
+  var pct=total?Math.round(lulus/total*100):0;
+
+  var defs=[
+    {l:'Unit lulus',s:'rata-rata ≥ 90',n:lulus,c:'#00B4D8',tc:'#0077B6'},
+    {l:'Belum lulus',s:'rata-rata &lt; 90',n:belumLulus,c:'#f5be6e',tc:'#b45309'},
+    {l:'Belum assessment',s:'tahun '+latest,n:belumAss,c:'#ee7b87',tc:'#dc2626'}
+  ];
+  section.innerHTML=head('Status unit · tahun '+latest)+
+    '<div class="hx-row">'+
+      '<div class="hx-ring" style="cursor:default;"><canvas id="ho-assess-pie"></canvas>'+
+        '<div class="hx-ring-c"><b>'+pct+'%</b><span>Lulus</span></div></div>'+
+      '<div class="hx-stats">'+defs.map(function(d){
+        return '<div class="hx-st" style="cursor:default;"><span class="hx-dot" style="background:'+d.c+'"></span>'+
+          '<span class="hx-st-l">'+d.l+'<small>'+d.s+'</small></span><span class="hx-st-n" style="color:'+d.tc+'">'+d.n+'</span></div>';
+      }).join('')+'</div>'+
+    '</div>'+
+    '<div class="hx-sep"></div><div id="ho-assess-inner"></div>';
+
+  /* detail (grafik + tabel + unit belum assessment) dirender ke #ho-assess-inner memakai renderer lama */
+  var inner=document.getElementById('ho-assess-inner');
+  section.id='ho-assess-section-dash';
+  inner.id='ho-assess-section';
+  try{ _hoAssessOrig(all); }catch(err){ console.error('assess detail',err); }
+  inner.id='ho-assess-inner';
+  section.id='ho-assess-section';
+
+  setTimeout(function(){
+    var cv=document.getElementById('ho-assess-pie'); if(!cv) return;
+    if(Chart.getChart&&Chart.getChart(cv)) Chart.getChart(cv).destroy();
+    new Chart(cv.getContext('2d'),{
+      type:'doughnut',
+      data:{datasets:[{data:total>0?[lulus,belumLulus,belumAss]:[1],
+        backgroundColor:total>0?['#00B4D8','#f5be6e','#ee7b87']:['#e2e8f0'],
+        borderWidth:0,borderRadius:12,spacing:total>0?3:0,hoverOffset:4}]},
+      options:{cutout:'58%',maintainAspectRatio:true,events:[],
+        plugins:{legend:{display:false},tooltip:{enabled:false}},animation:{duration:700}}
+    });
+  },80);
+  hoRefreshDots();
+};
+
+/* ── 8. WTP Internal & Eksternal: pie + detail muncul DI BAWAH grafik (tanpa modal) ── */
+window._hoWtpLbl={int:'',ext:''};
+
+function hoWtpPies(section,res,cfg){
+  if(!section) return;
+  if(res&&res.status==='success'&&res.params) window[cfg.store]=res.params;
+  var title=cfg.dark?'<p class="dk-title">'+cfg.title+'</p>'
+                    :'<p class="section-label" style="margin-bottom:14px;">'+cfg.title+'</p>';
+  if(!res||res.status!=='success'||!res.params){
+    section.innerHTML=title+'<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
+    return;
+  }
+  var labels=cfg.order.filter(function(l){ return res.params.hasOwnProperty(l); });
+  var html=title+'<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px 10px;">';
+  labels.forEach(function(lbl,i){
+    var d=res.params[lbl],n=d.normalUnits.length,b=d.belowUnits.length,t=n+b,pct=t?Math.round(n/t*100):0;
+    html+='<div style="text-align:center;cursor:pointer;" onclick="hoWtpPanel(\''+cfg.kind+'\',\''+lbl.replace(/'/g,"\\'")+'\')">'+
+      '<p style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;">'+lbl+'</p>'+
+      '<div style="position:relative;display:inline-block;width:100%;max-width:100px;aspect-ratio:1/1;">'+
+        '<canvas id="'+cfg.prefix+i+'" style="width:100%;height:100%;display:block;"></canvas></div>'+
+      '<p style="font-size:15px;font-weight:900;color:var(--text-1);margin:6px 0 0;line-height:1;">'+pct+'%</p>'+
+      '<div style="margin-top:6px;display:flex;justify-content:center;gap:7px;flex-wrap:wrap;">'+
+        hoLegendInline('#00B4D8','Normal',n)+hoLegendInline('#ef4444','Di bawah',b)+'</div></div>';
+  });
+  html+='</div><p style="font-size:10px;color:'+(cfg.dark?'rgba(255,255,255,.4)':'#cbd5e1')+';margin:14px 0 0;text-align:center;">Tap grafik untuk detail ›</p>'+
+        '<div id="'+cfg.panel+'" style="margin-top:12px;"></div>';
+  section.innerHTML=html;
+
+  setTimeout(function(){
+    Chart.defaults.font.family=WTP_FONT;
+    labels.forEach(function(lbl,i){
+      var cv=document.getElementById(cfg.prefix+i); if(!cv) return;
+      var d=res.params[lbl],n=d.normalUnits.length,b=d.belowUnits.length,has=(n+b)>0;
+      if(Chart.getChart&&Chart.getChart(cv)) Chart.getChart(cv).destroy();
+      new Chart(cv.getContext('2d'),{
+        type:'pie',
+        data:{labels:['Normal','Di bawah standar'],datasets:[{
+          data:has?[n,b]:[1],backgroundColor:has?['#00B4D8','#ef4444']:['#e2e8f0'],
+          borderWidth:0,borderRadius:12,spacing:(n>0&&b>0)?3:0,hoverOffset:4}]},
+        options:{maintainAspectRatio:true,
+          plugins:{legend:{display:false},
+            tooltip:{enabled:has,backgroundColor:'rgba(3,4,94,.96)',padding:12,cornerRadius:12,
+              callbacks:{label:function(c){ return ' '+c.label+': '+c.parsed+' unit'; }}}},
+          animation:{duration:600}}
+      });
+    });
+  },80);
+}
+
+function renderHOWtpDonuts(res){
+  hoWtpPies(document.getElementById('ho-wtp-section'),res,{
+    kind:'int',store:'_hoWtpParams',prefix:'wtp-ho-pie-',panel:'ho-wtpint-panel',dark:true,
+    title:'Water Quality · Parameter Air WTP — Semua Unit',
+    order:['pH','M-Alk','Silica','O-Alk/Silica','Sulfite','TDS','Phosphate']
+  });
+  try{hoRefreshDots();}catch(e){}
+}
+
+/* klik pie -> daftar unit tampil di bawah grafik */
+function hoWtpPanel(kind,lbl){
+  var P=(kind==='int')?window._hoWtpParams:window._hoWtpExtParams;
+  var d=P&&P[lbl];
+  var panel=document.getElementById('ho-wtp'+kind+'-panel');
+  if(!d||!panel) return;
+  window._hoWtpLbl[kind]=lbl;
+
+  function rows(units,below){
+    if(!units.length) return '<p style="color:#94a3b8;font-size:13px;padding:10px 0;">Tidak ada unit.</p>';
+    return units.map(function(u){
+      var color=below?'#dc2626':'#0077B6';
+      return '<div class="hm-searchable-row" onclick="hoWtpUnit(\''+kind+'\',\''+String(u.unit).replace(/'/g,"\\'")+'\')" '+
+        'style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;cursor:pointer;">'+
+        '<span style="font-size:14px;font-weight:700;color:#111;">'+lcEsc(u.unit)+'</span>'+
+        '<div style="display:flex;align-items:center;gap:6px;">'+
+          '<span style="font-size:13px;font-weight:800;color:'+color+';">'+u.value.toFixed(1)+'% <span style="font-size:11px;color:#94a3b8;font-weight:600;">(min. '+u.std.toFixed(1)+'%)</span></span>'+
+          '<span style="color:#cbd5e1;font-size:14px;">›</span></div></div>';
+    }).join('');
+  }
+  var listId='ho-wtp-'+kind+'-list';
+  panel.innerHTML=
+    '<div style="background:#fff;border-radius:16px;padding:14px;color:#111;box-shadow:0 4px 16px rgba(0,0,0,.12);">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;">'+
+        '<div><h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">'+lcEsc(lbl)+'</h3>'+
+        '<p style="font-size:12px;color:#94a3b8;margin:2px 0 0;">'+(d.normalUnits.length+d.belowUnits.length)+' unit · ketuk unit untuk grafik</p></div>'+
+        '<button onclick="document.getElementById(\'ho-wtp'+kind+'-panel\').innerHTML=\'\'" style="width:34px;height:34px;border-radius:50%;border:none;background:#f1f5f9;cursor:pointer;font-size:18px;color:#6b7280;">&times;</button>'+
+      '</div>'+
+      hmSearchBarHtml(listId,'Cari unit...')+
+      '<div id="'+listId+'">'+
+        '<p style="font-size:11px;font-weight:700;color:#dc2626;letter-spacing:.08em;text-transform:uppercase;margin:6px 0 2px;">⚠️ Di Bawah Standar ('+d.belowUnits.length+')</p>'+rows(d.belowUnits,true)+
+        '<p style="font-size:11px;font-weight:700;color:#0077B6;letter-spacing:.08em;text-transform:uppercase;margin:16px 0 2px;">✅ Normal ('+d.normalUnits.length+')</p>'+rows(d.normalUnits,false)+
+      '</div>'+
+    '</div>';
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+function hoWtpBack(kind){ hoWtpPanel(kind,window._hoWtpLbl[kind]); }
+
+/* klik unit -> grafik unit tampil di panel yang sama */
+function hoWtpUnit(kind,unit){
+  var panel=document.getElementById('ho-wtp'+kind+'-panel'); if(!panel) return;
+  var isInt=(kind==='int');
+  var ids=isInt
+    ?{tabs:'wtp-ho-unit-tabs',bulan:'wtp-ho-unit-bulan-label',cv:'wtp-ho-unit-chart',empty:'wtp-ho-unit-empty'}
+    :{tabs:'',bulan:'wtpext-ho-unit-bulan-label',cv:'wtpext-ho-unit-chart',empty:'wtpext-ho-unit-empty'};
+  panel.innerHTML=
+    '<div style="background:#fff;border-radius:16px;padding:14px;color:#111;box-shadow:0 4px 16px rgba(0,0,0,.12);font-family:'+WTP_FONT+';">'+
+      '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">'+
+        '<div><h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">'+lcEsc(unit)+'</h3>'+
+        '<p style="font-size:12px;color:#94a3b8;margin:2px 0 0;">'+(isInt?'Parameter Air WTP':'Parameter Air Eksternal')+' · klik bar untuk tren bulanan</p></div>'+
+        '<button onclick="hoWtpBack(\''+kind+'\')" style="padding:8px 12px;border-radius:10px;border:none;background:#e0f4ff;color:#005f92;font-weight:700;font-size:12px;cursor:pointer;">‹ Kembali</button>'+
+      '</div>'+
+      (isInt?'<div id="'+ids.tabs+'" class="period-tabs" style="margin-bottom:10px;"></div>':'')+
+      '<p id="'+ids.bulan+'" style="font-size:11px;color:#94a3b8;margin-bottom:8px;"></p>'+
+      '<div style="height:280px;position:relative;"><canvas id="'+ids.cv+'"></canvas></div>'+
+      '<div id="'+ids.empty+'" style="display:none;padding:40px 0;text-align:center;color:#94a3b8;font-size:13px;">Belum ada data untuk unit ini.</div>'+
+    '</div>';
+  panel.scrollIntoView({behavior:'smooth',block:'nearest'});
+
+  if(isInt){
+    wtpHoLastUnitName=unit;
+    google.script.run
+      .withSuccessHandler(function(res){
+        if(!document.getElementById(ids.cv)) return;
+        wtpData=wtpFixLabels(res,unit);
+        wtpHoUnitModalBoilerIdx=0;
+        renderWtpHoUnitModal();
+      })
+      .withFailureHandler(function(err){ showToast('❌ Gagal Loading data: '+(err.message||'')); })
+      .getWtpZmdData(unit);
+  }else{
+    google.script.run
+      .withSuccessHandler(function(res){
+        if(!document.getElementById(ids.cv)) return;
+        wtpExtData=res;
+        renderWtpExtHOUnitChart(unit);
+      })
+      .withFailureHandler(function(err){ showToast('❌ Gagal Loading data: '+(err.message||'')); })
+      .getWtpZmd9Data(unit);
+  }
+}
+
+/* pemanggil lama (jika masih ada) diarahkan ke tampilan inline */
+function openWtpHODetailModal(lbl){ hoWtpPanel('int',lbl); }
+function openWtpExtHODetailModal(lbl){ hoWtpPanel('ext',lbl); }
 </script>
 </body>
 </html>
