@@ -1936,6 +1936,24 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
 .sv-note:first-of-type{border-top:none;}
 .sv-note i{margin-top:3px;color:#d97706;flex-shrink:0;}
 
+/* ═══ Running text (sheet AN) ═══ */
+.an-bar{display:none;align-items:stretch;margin:10px 16px 0;height:40px;border-radius:14px;overflow:hidden;color:#fff;
+  background:linear-gradient(160deg,#03045e 0%,#0077B6 65%,#0096c7 100%);box-shadow:0 6px 18px rgba(0,119,182,.25);}
+.an-bar.show{display:flex;animation:fadeIn .4s ease both;}
+.an-ic{flex-shrink:0;width:42px;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,.14);color:#fcd34d;font-size:15px;}
+.an-ic i{animation:icoShake 2.6s ease-in-out infinite;}
+.an-view{flex:1;min-width:0;overflow:hidden;white-space:nowrap;display:flex;align-items:center;
+  -webkit-mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);
+  mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);}
+.an-track{display:inline-flex;padding-left:100%;will-change:transform;animation:anRun var(--d,20s) linear infinite;}
+.an-view:active .an-track{animation-play-state:paused;}
+@keyframes anRun{to{transform:translateX(-100%)}}
+.an-it{display:inline-flex;align-items:center;gap:8px;padding-right:56px;font-size:12.5px;font-weight:700;}
+.an-it i{font-size:11px;animation:none;}
+.an-it.info i{color:#90e0ef;}
+.an-it.penting i{color:#fcd34d;}
+.an-it.peringatan i{color:#ff9b9b;}
+
 </style>
 </head>
 <body>
@@ -2241,6 +2259,7 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
       </div>
     </div>
   </header>
+  <div data-an class="an-bar"></div>
   <div class="px-4 pt-3">
     <div class="rounded-3xl px-5 py-5 text-white relative overflow-hidden" style="background:var(--navy);">
 
@@ -2941,6 +2960,8 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
     <div class="hrt-tx"><b id="hrt-title">—</b><small id="hrt-sub">Ketuk untuk membuka daftar review</small></div>
     <button class="hrt-x" onclick="event.stopPropagation();hoReviewToastDismiss()" title="Sembunyikan">&times;</button>
   </div>
+
+  <div data-an class="an-bar"></div>
 
   <!-- Konten dinamis -->
   <div id="ho-content" class="px-4 pt-4"></div>
@@ -4216,6 +4237,7 @@ function loadData(unit, silent){
   loadWtpExt(unit);
   loadStandbyStatus(unit);
   loadEfisiensiPrefetch(unit);
+  anLoad(unit);
   loadPerformancePrefetch(unit);
   notifRefreshSoon();
   // loadOperasional(unit);   // ⛔ OPERASIONAL BOILER — disembunyikan sementara (poin 4)
@@ -8421,6 +8443,7 @@ function loadDataHO(forceRefresh) {
   if (greetEl) greetEl.textContent = 'Halo, ' + fn;
 
   var contentEl = document.getElementById('ho-content');
+  anLoad(userData.unit);
   if (!contentEl) return;
 
   var isFresh = hoRawData && (Date.now() - _hoCacheTime) < CACHE_TTL_MS;
@@ -10678,6 +10701,31 @@ function toggleHOReviewBanner() {
   var isOpen = body.style.maxHeight && body.style.maxHeight !== '0px';
   body.style.maxHeight = isOpen ? '0px' : '1000px';
   if (chevron) chevron.style.transform = isOpen ? '' : 'rotate(180deg)';
+}
+
+/* ═══ RUNNING TEXT (sheet AN) ═══ */
+var AN_IC = { info:'fa-circle-info', penting:'fa-star', peringatan:'fa-triangle-exclamation' };
+var anList = [];
+
+function anLoad(unit){
+  google.script.run
+    .withSuccessHandler(function(r){ anList = r || []; anRender(); })
+    .withFailureHandler(function(){})
+    .getAnnouncements(unit);
+}
+
+function anRender(){
+  var one = anList.map(function(a){
+    var t = AN_IC[a.tipe] ? a.tipe : 'info';
+    return '<span class="an-it ' + t + '"><i class="fa-solid ' + AN_IC[t] + '"></i>' + lcEsc(a.msg) + '</span>';
+  }).join('');
+  var len = anList.reduce(function(s, a){ return s + a.msg.length + 8; }, 0);
+  document.querySelectorAll('[data-an]').forEach(function(bar){
+    if(!one){ bar.classList.remove('show'); bar.innerHTML = ''; return; }
+    bar.innerHTML = '<div class="an-ic"><i class="fa-solid fa-bullhorn"></i></div>' +
+      '<div class="an-view"><div class="an-track" style="--d:' + Math.max(12, Math.round(len * 0.17 + 8)) + 's">' + one + '</div></div>';
+    bar.classList.add('show');
+  });
 }
 
 /* Fix untuk WebView Android Kodular */
