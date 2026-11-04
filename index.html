@@ -4500,9 +4500,9 @@ function renderWtpTiles() {
   refreshNavDots();
 }
 
-var WTP_LINE_COLORS = ['#5B9BD5', '#2DD4BF', '#38BDF8', '#818CF8', '#A78BFA', '#F472B6', '#34D399'];
-var WTP_DANGER_COLOR  = '#B91C1C'; // merah tegas, tidak neon
-var WTP_MUTED_COLOR   = '#CBD5E1'; // abu-abu terang untuk bar YTD (pudar seperti referensi)
+var WTP_LINE_COLORS = ['#0077B6', '#00B4D8', '#0096c7', '#023e8a', '#48cae4', '#2a8fbd', '#03045e'];
+var WTP_DANGER_COLOR  = '#d9626f'; // merah tegas, tidak neon
+var WTP_MUTED_COLOR   = '#bde0fe'; // abu-abu terang untuk bar YTD (pudar seperti referensi)
 var WTP_FONT = "'Miriam Libre', sans-serif";
 var wtpParamChart = null; // chart bar di modal detail per-parameter
 
@@ -4912,34 +4912,11 @@ function wtpRenderNotif(){
 }
 
 var wtpExtData = null, wtpExtChart = null, wtpExtParamChart = null;
-var WTPEXT_LINE_COLORS  = ['#7DD3FC','#86EFAC','#FDBA74','#F9A8D4','#C4B5FD','#5EEAD4']; // soft pastel
-var WTPEXT_MUTED_COLOR  = '#E2E8F0';
-var WTPEXT_DANGER_COLOR = '#F87171';
+var WTPEXT_LINE_COLORS  = WTP_LINE_COLORS;
+var WTPEXT_MUTED_COLOR  = WTP_MUTED_COLOR;
+var WTPEXT_DANGER_COLOR = WTP_DANGER_COLOR;
 
-var wtpExtValueBadgePlugin = {
-  id: 'wtpExtValueBadge',
-  afterDatasetsDraw: function(chart, args, opts) {
-    var ctx = chart.ctx;
-    var datasetIndexes = (opts && opts.datasetIndexes) || [0];
-    datasetIndexes.forEach(function(dsIndex) {
-      var meta = chart.getDatasetMeta(dsIndex);
-      if (!meta || meta.hidden) return;
-      var dataset = chart.data.datasets[dsIndex];
-      meta.data.forEach(function(bar, i) {
-        var val = dataset.data[i];
-        if (val === null || val === undefined) return;
-        var color = Array.isArray(dataset.backgroundColor) ? dataset.backgroundColor[i] : dataset.backgroundColor;
-        ctx.save();
-        ctx.fillStyle = color;
-        ctx.font = "800 11px " + WTP_FONT;
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        ctx.fillText(val.toFixed(0) + '%', bar.x, bar.y - 10);
-        ctx.restore();
-      });
-    });
-  }
-};
+var wtpExtValueBadgePlugin = Object.assign({}, wtpValueBadgePlugin, { id: 'wtpExtValueBadge' });
 
 function loadWtpExt(unit) {
   google.script.run
@@ -5027,7 +5004,7 @@ function wtpExtRenderComparisonTable(std, containerEl) {
     var lastTxt = (p.last !== null && p.last !== undefined) ? p.last.toFixed(1) + '%' : '—';
     var ytdTxt  = (p.ytd  !== null && p.ytd  !== undefined) ? p.ytd.toFixed(1)  + '%' : '—';
     var below = (std != null && p.last != null && p.last < std);
-    var lastColor = below ? '#DC2626' : '#0EA5E9';
+    var lastColor = below ? '#B91C1C' : '#0077B6';
     var statusChip = below
       ? '<span style="padding:2px 9px;border-radius:100px;font-size:10px;font-weight:700;background:#fee2e2;color:#DC2626;"> < Standar</span>'
       : '<span style="padding:2px 9px;border-radius:100px;font-size:10px;font-weight:700;background:#e0f2fe;color:#0ea5e9;">Normal</span>';
@@ -8529,131 +8506,6 @@ function loadDataHO(forceRefresh) {
     .getHOData();
 }
 
-// ── RENDER UTAMA ───────────────────────────────────────────────
-function renderHODashboard(res) {
-  var contentEl = document.getElementById('ho-content');
-  if (!contentEl) return;
-
-  // Data dari getHOData (format baru):
-  // res.hlItems   = [{unit, boiler, tgl, status, daysLeft, expiry}]
-  // res.riksaItems= [{unit, boiler, tgl, status, daysLeft, expiry}]
-  // res.simItems  = [{unit, shift, tgl, status, daysLeft, expiry}]
-  // res.summary   = { hl:{aktif,perhatian,expired}, riksa:{...}, sim:{aktif,belum,expired} }
-
-  var hlItems    = res.hlItems    || [];
-  var riksaItems = res.riksaItems || [];
-  var simItems   = res.simItems   || [];
-  var summary    = res.summary    || {};
-  var hl         = summary.hl    || { aktif:0, perhatian:0, expired:0 };
-  var riksa      = summary.riksa || { aktif:0, perhatian:0, expired:0 };
-  var sim        = summary.sim   || { aktif:0, belum:0,     expired:0 };
-  var generated  = res.generated || '';
-
-  // BKPM hanya 1 shift: buang "Shift 2" BKPM lalu hitung ulang ringkasan simulasi
-  if (simItems.some(function(i){ return String(i.unit).toUpperCase()==='BKPM' && /2/.test(i.shift); })) {
-    simItems = simItems.filter(function(i){ return !(String(i.unit).toUpperCase()==='BKPM' && /2/.test(i.shift)); });
-    sim = { aktif:0, belum:0, expired:0 };
-    simItems.forEach(function(i){ if (sim[i.status] !== undefined) sim[i.status]++; });
-    res.simItems = simItems;
-    if (res.summary) res.summary.sim = sim;
-  }
-
-  var html = '';
-  if (generated) {
-    html += '<p style="font-size:11px;color:#94a3b8;font-weight:600;margin-bottom:14px;">🕐 Update: ' + generated + '</p>';
-  }
-
-  // ── UTILITAS PABRIK — donut 2 bagian (≥95% vs <95%) — PALING ATAS ──
-  html +=
-    '<div class="ho-assess-wrap" id="ho-utilitas-section">' +
-    '<p class="section-label" style="margin-bottom:10px;">% Breakdown Pabrik — Semua Unit</p>' +
-    '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
-    '</div>';
-
-  // ── HM INSPEKSI — donut lewat / mendekati / masih baik ──
-  html +=
-    '<div class="ho-assess-wrap" id="ho-hm-section">' +
-    '<p class="section-label" style="margin-bottom:10px;">HM Inspeksi Boiler — Semua Unit</p>' +
-    '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
-    '</div>';
-
-  // ── DONUT SECTION — Ringkasan Heatloss / Riksa / Simulasi ──────
-  html += '<div class="dk-card" style="margin-bottom:16px;">';
-  html += '<p class="dk-title">Summary Status Keseluruhan</p>';
-  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:12px;">';
-
-  var donutDefs = [
-    { id:'donut-hl',    type:'hl',    label:'Heatloss',  a:hl.aktif,    p:hl.perhatian,    e:hl.expired,    lA:'Aktif', lP:'Perhatian', lE:'Expired', cA:'#00B4D8', cP:'#f59e0b', cE:'#ef4444' },
-    { id:'donut-riksa', type:'riksa', label:'Riksa Uji', a:riksa.aktif, p:riksa.perhatian, e:riksa.expired, lA:'Aktif', lP:'Perhatian', lE:'Expired', cA:'#00B4D8', cP:'#f59e0b', cE:'#ef4444' },
-    { id:'donut-sim',   type:'sim',   label:'Simulasi',  a:sim.aktif,   p:sim.belum,       e:sim.expired,   lA:'Aktif', lP:'Belum',     lE:'Expired', cA:'#00B4D8', cP:'#94a3b8', cE:'#ef4444' }
-  ];
-
-  donutDefs.forEach(function(d) {
-    var total = (d.a||0) + (d.p||0) + (d.e||0);
-    html +=
-      '<div style="text-align:center;cursor:pointer;" onclick="openHOCategoryModal(\'' + d.type + '\')">' +
-        '<p style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;">' + d.label + '</p>' +
-        '<div style="position:relative;display:inline-block;width:100%;max-width:120px;aspect-ratio:1/1;">' +
-          '<canvas id="' + d.id + '" style="width:100%;height:100%;display:block;"></canvas>' +
-          '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">' +
-            '<span style="font-size:22px;font-weight:900;color:var(--text-1);line-height:1;">' + total + '</span>' +
-            '<span style="font-size:9px;font-weight:600;color:#94a3b8;">Total</span>' +
-          '</div>' +
-        '</div>' +
-        '<div style="margin-top:8px;display:flex;justify-content:center;gap:7px;flex-wrap:wrap;">' +
-          hoLegendInline(d.cA, d.lA, d.a||0) +
-          hoLegendInline(d.cP, d.lP, d.p||0) +
-          hoLegendInline(d.cE, d.lE, d.e||0) +
-        '</div>' +
-      '</div>';
-  });
-  html += '</div></div>';
-
-  // Card angka aktif/perhatian/expired untuk HL, Riksa, Simulasi
-  // dipindahkan ke dalam modal (buka via klik donut ringkasan di atas).
-  // Lihat: openHOCategoryModal(type)
-
-  // ── WTP EKSTERNAL DONUTS placeholder ────────────────────────────
-  html +=
-    '<div class="ho-assess-wrap" id="ho-wtpext-section">' +
-    '<p class="section-label" style="margin-bottom:10px;">Parameter Air Eksternal — Semua Unit</p>' +
-    '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
-    '</div>';
-
-  // ── WTP DONUTS placeholder ─────────────────────────────────────
-  html +=
-    '<div class="ho-assess-wrap" id="ho-wtp-section">' +
-    '<p class="section-label" style="margin-bottom:10px;">Parameter Air WTP — Semua Unit</p>' +
-    '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
-    '</div>';
-
-  // ── ASSESSMENT placeholder ────────────────────────────────────
-  html +=
-    '<div class="ho-assess-wrap" id="ho-assess-section">' +
-    '<p class="section-label" style="margin-bottom:10px;">Assessment SOP & IK — Semua Unit</p>' +
-    '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
-    '</div>';
-
-  // ── BOILER STANDBY REKAP placeholder ──────────────────────────
-  html +=
-    '<div class="ho-assess-wrap" id="ho-standby-section">' +
-    '<p class="section-label" style="margin-bottom:10px;">Rekap Boiler Standby — Semua Unit</p>' +
-    '<div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div>' +
-    '</div>';
-
-  // ── REFRESH BTN ───────────────────────────────────────────────
-  html +=
-    '<button onclick="loadDataHO(true)" style="width:100%;padding:14px;background:var(--primary-dark);border:none;border-radius:16px;color:white;font-weight:700;font-size:14px;cursor:pointer;font-family:\'Plus Jakarta Sans\',sans-serif;display:flex;align-items:center;justify-content:center;gap:8px;margin-top:4px;">' +
-    '<i class="fa-solid fa-rotate-right"></i> Refresh Data</button>';
-
-  contentEl.innerHTML = html;
-
-  setTimeout(function() {
-    drawHODonut('donut-hl',    hl.aktif||0,    hl.perhatian||0,    hl.expired||0,    false);
-    drawHODonut('donut-riksa', riksa.aktif||0, riksa.perhatian||0, riksa.expired||0, false);
-    drawHODonut('donut-sim',   sim.aktif||0,   sim.belum||0,       sim.expired||0,   true);
-  }, 80);
-}
 
 // ── HELPER: legend row ────────────────────────────────────────
 function hoLegendInline(color, label, count) {
@@ -8701,153 +8553,18 @@ function drawHODonut(canvasId, aktif, perhatian, expired, isSimulasi) {
   });
 }
 
-// ── HO: WTP EKSTERNAL DONUTS ──────────────────────────────────
+// ── HO: WTP EKSTERNAL (pie, memakai hoWtpPies) ──
 var WTP9_PARAM_LABELS_JS = ['Clarifier', 'Sand Filter', 'Hardness', 'Silica', 'pH FT', 'TDS FT'];
 
 function renderHOWtpExtDonuts(res) {
-  var section = document.getElementById('ho-wtpext-section');
-  if (!section) return;
-
-  if (!res || res.status !== 'success' || !res.params) {
-    section.innerHTML =
-      '<p class="section-label" style="margin-bottom:10px;">Parameter Air Eksternal — Semua Unit</p>' +
-      '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
-    return;
-  }
-
-  window._hoWtpExtParams = res.params;
-
-  var paramLabels = WTP9_PARAM_LABELS_JS.filter(function(lbl) {
-    return res.params.hasOwnProperty(lbl);
+  hoWtpPies(document.getElementById('ho-wtpext-section'), res, {
+    kind:'ext', store:'_hoWtpExtParams', prefix:'wtpext-ho-pie-', panel:'ho-wtpext-panel', dark:false,
+    title:'Parameter Air Eksternal — Semua Unit', order:WTP9_PARAM_LABELS_JS
   });
-
-  var html = '<p class="section-label" style="margin-bottom:14px;">Parameter Air Eksternal — Semua Unit</p>';
-  html += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">';
-
-  paramLabels.forEach(function(lbl, i) {
-    var d = res.params[lbl];
-    var normal = d.normalUnits.length;
-    var below  = d.belowUnits.length;
-    var total  = normal + below;
-    var pctNormal = total > 0 ? Math.round((normal / total) * 100) : 0;
-    var canvasId = 'wtpext-ho-donut-' + i;
-
-    html +=
-      '<div style="text-align:center;cursor:pointer;" onclick="openWtpExtHODetailModal(\'' + lbl.replace(/'/g,"\\'") + '\')">' +
-        '<p style="font-size:9px;font-weight:700;color:#94a3b8;letter-spacing:.04em;text-transform:uppercase;margin-bottom:6px;">' + lbl + '</p>' +
-        '<div style="position:relative;display:inline-block;">' +
-          '<canvas id="' + canvasId + '" width="88" height="88"></canvas>' +
-          '<div style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;pointer-events:none;">' +
-            '<span style="font-size:15px;font-weight:900;color:var(--text-1);line-height:1;">' + pctNormal + '%</span>' +
-          '</div>' +
-        '</div>' +
-        '<p style="font-size:9px;color:#cbd5e1;margin-top:4px;">' + total + ' unit · Tap detail ›</p>' +
-      '</div>';
-  });
-  html += '</div>';
-
-  section.innerHTML = html;
-
-  setTimeout(function() {
-    paramLabels.forEach(function(lbl, i) {
-      var d = res.params[lbl];
-      drawHODonut('wtpext-ho-donut-' + i, d.normalUnits.length, 0, d.belowUnits.length, false);
-    });
-  }, 80);
-}
-
-function openWtpExtHODetailModal(paramLabel) {
-  var d = window._hoWtpExtParams && window._hoWtpExtParams[paramLabel];
-  if (!d) return;
-
-  function buildList(units, isBelow) {
-    if (!units.length) return '<p style="color:#94a3b8;font-size:13px;padding:12px 0;">Tidak ada unit.</p>';
-    return units.map(function(u) {
-      var color = isBelow ? '#dc2626' : '#0ea5e9';
-      return '<div class="hm-searchable-row" onclick="openWtpExtHOUnitOverviewModal(\'' + u.unit.replace(/'/g,"\\'") + '\')" ' +
-        'style="display:flex;align-items:center;justify-content:space-between;padding:10px 0;border-bottom:1px solid #f1f5f9;cursor:pointer;">' +
-        '<span style="font-size:14px;font-weight:700;color:#111;">' + u.unit + '</span>' +
-        '<div style="display:flex;align-items:center;gap:6px;">' +
-          '<span style="font-size:13px;font-weight:800;color:' + color + ';">' + u.value.toFixed(1) + '% <span style="font-size:11px;color:#94a3b8;font-weight:600;">(min. ' + u.std.toFixed(1) + '%)</span></span>' +
-          '<span style="color:#cbd5e1;font-size:14px;">›</span>' +
-        '</div>' +
-      '</div>';
-    }).join('');
-  }
-
-  var old = document.getElementById('wtpext-ho-detail-modal');
-  if (old) old.remove();
-
-  var modalHtml =
-    '<div id="wtpext-ho-detail-modal" class="ho-modal open">' +
-      '<div class="ho-modal-overlay" onclick="document.getElementById(\'wtpext-ho-detail-modal\').remove()"></div>' +
-      '<div class="ho-modal-sheet">' +
-        '<div class="ho-modal-handle"></div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">' +
-          '<div>' +
-            '<h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">' + paramLabel + '</h3>' +
-            '<p style="font-size:12px;color:#94a3b8;margin-top:2px;">' + (d.normalUnits.length + d.belowUnits.length) + ' unit ditemukan</p>' +
-          '</div>' +
-          '<button onclick="document.getElementById(\'wtpext-ho-detail-modal\').remove()" style="width:36px;height:36px;border-radius:50%;border:none;background:#f1f5f9;cursor:pointer;font-size:18px;color:#6b7280;">&times;</button>' +
-        '</div>' +
-        '<div class="ho-modal-body">' +
-          hmSearchBarHtml('wtpext-ho-detail-body', 'Cari unit...') +
-          '<div id="wtpext-ho-detail-body" style="padding:0 0 30px;">' +
-            '<p style="font-size:11px;font-weight:700;color:#dc2626;letter-spacing:.08em;text-transform:uppercase;margin:14px 0 4px;">⚠️ Di Bawah Standar (' + d.belowUnits.length + ')</p>' +
-            buildList(d.belowUnits, true) +
-            '<p style="font-size:11px;font-weight:700;color:#0ea5e9;letter-spacing:.08em;text-transform:uppercase;margin:18px 0 4px;">✅ Normal (' + d.normalUnits.length + ')</p>' +
-            buildList(d.normalUnits, false) +
-          '</div>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
+  try { hoRefreshDots(); } catch(e) {}
 }
 
 var wtpExtHoUnitModalChart = null;
-
-function openWtpExtHOUnitOverviewModal(unit) {
-  var oldList = document.getElementById('wtpext-ho-detail-modal');
-  if (oldList) oldList.remove();
-
-  var old = document.getElementById('wtpext-ho-unit-modal');
-  if (old) old.remove();
-
-  var modalHtml =
-    '<div id="wtpext-ho-unit-modal" class="ho-modal open" style="font-family:' + WTP_FONT + ';">' +
-      '<div class="ho-modal-overlay" onclick="document.getElementById(\'wtpext-ho-unit-modal\').remove()"></div>' +
-      '<div class="ho-modal-sheet">' +
-        '<div class="ho-modal-handle"></div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">' +
-          '<div>' +
-            '<h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">' + unit + '</h3>' +
-            '<p style="font-size:12px;color:#94a3b8;margin-top:2px;">Parameter Air Eksternal · Klik bar untuk tren bulanan</p>' +
-          '</div>' +
-          '<button onclick="document.getElementById(\'wtpext-ho-unit-modal\').remove()" style="width:36px;height:36px;border-radius:50%;border:none;background:#f1f5f9;cursor:pointer;font-size:18px;color:#6b7280;">&times;</button>' +
-        '</div>' +
-        '<div class="ho-modal-body"><div style="padding:14px 16px 30px;">' +
-          '<p id="wtpext-ho-unit-bulan-label" style="font-size:11px;color:var(--text-3);margin-bottom:8px;"></p>' +
-          '<div style="height:280px;position:relative;"><canvas id="wtpext-ho-unit-chart"></canvas></div>' +
-          '<div id="wtpext-ho-unit-empty" style="display:none;padding:40px 0;text-align:center;color:#94a3b8;font-size:13px;">Belum ada data parameter eksternal untuk unit ini.</div>' +
-        '</div></div>' +
-      '</div>' +
-    '</div>';
-
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-  showToast('Loading data ' + unit + '...', 1500);
-
-  google.script.run
-    .withSuccessHandler(function(res) {
-      if (!document.getElementById('wtpext-ho-unit-modal')) return;
-      wtpExtData = res;
-      renderWtpExtHOUnitChart(unit);
-    })
-    .withFailureHandler(function(err) {
-      showToast('❌ Gagal Loading data: ' + (err.message || ''));
-    })
-    .getWtpZmd9Data(unit);
-}
 
 function renderWtpExtHOUnitChart(unit) {
   var emptyEl  = document.getElementById('wtpext-ho-unit-empty');
@@ -9282,53 +8999,6 @@ var wtpHoUnitModalChart = null;
 var wtpHoUnitModalBoilerIdx = 0;
 var wtpHoLastUnitName = '';
 
-// STEP 1 — klik nama unit → tampilkan grafik overview (semua parameter,
-// bulan terakhir vs YTD), sama seperti chart utama dashboard non-HO.
-function openWtpHOUnitOverviewModal(unit) {
-  wtpHoLastUnitName = unit;
-  var oldList = document.getElementById('wtp-ho-detail-modal');
-  if (oldList) oldList.remove();
-
-  var old = document.getElementById('wtp-ho-unit-modal');
-  if (old) old.remove();
-
-  var modalHtml =
-    '<div id="wtp-ho-unit-modal" class="ho-modal open" style="font-family:' + WTP_FONT + ';">' +
-      '<div class="ho-modal-overlay" onclick="document.getElementById(\'wtp-ho-unit-modal\').remove()"></div>' +
-      '<div class="ho-modal-sheet">' +
-        '<div class="ho-modal-handle"></div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">' +
-          '<div>' +
-            '<h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">' + unit + '</h3>' +
-            '<p style="font-size:12px;color:#94a3b8;margin-top:2px;">Parameter Air WTP · Klik bar untuk tren bulanan</p>' +
-          '</div>' +
-          '<button onclick="document.getElementById(\'wtp-ho-unit-modal\').remove()" style="width:36px;height:36px;border-radius:50%;border:none;background:#f1f5f9;cursor:pointer;font-size:18px;color:#6b7280;">&times;</button>' +
-        '</div>' +
-        '<div class="ho-modal-body"><div style="padding:14px 16px 30px;">' +
-          '<div id="wtp-ho-unit-tabs" class="period-tabs" style="margin-bottom:10px;"></div>' +
-          '<p id="wtp-ho-unit-bulan-label" style="font-size:11px;color:var(--text-3);margin-bottom:8px;"></p>' +
-          '<div style="height:280px;position:relative;"><canvas id="wtp-ho-unit-chart"></canvas></div>' +
-          '<div id="wtp-ho-unit-empty" style="display:none;padding:40px 0;text-align:center;color:#94a3b8;font-size:13px;">Belum ada data parameter air untuk unit ini.</div>' +
-        '</div></div>' +
-      '</div>' +
-    '</div>';
-
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-  showToast('Loading data ' + unit + '...', 1500);
-
-  google.script.run
-    .withSuccessHandler(function(res) {
-      if (!document.getElementById('wtp-ho-unit-modal')) return; // modal sudah ditutup user
-      wtpData = wtpFixLabels(res, unit); // dipakai juga oleh wtpOpenParamDetailModal saat drill-down per parameter
-      wtpHoUnitModalBoilerIdx = 0;
-      renderWtpHoUnitModal();
-    })
-    .withFailureHandler(function(err) {
-      showToast('❌ Gagal Loading data: ' + (err.message || ''));
-    })
-    .getWtpZmdData(unit);
-}
-
 function renderWtpHoUnitModal() {
   var tabsEl   = document.getElementById('wtp-ho-unit-tabs');
   var emptyEl  = document.getElementById('wtp-ho-unit-empty');
@@ -9422,168 +9092,6 @@ function renderWtpHoUnitModal() {
     }
   });
 }
-
-// ── MODAL DETAIL — list per boiler/shift ──────────────────────
-function openHODetailModal(type, status) {
-  var today = new Date(); today.setHours(0,0,0,0);
-
-  var titleMap = {
-    hl   : { aktif:'Heatloss — Aktif', perhatian:'Heatloss — Perhatian', expired:'Heatloss — Expired' },
-    riksa: { aktif:'Riksa Uji — Aktif', perhatian:'Riksa Uji — Perhatian', expired:'Riksa Uji — Expired' },
-    sim  : { aktif:'Simulasi — Aktif', belum:'Simulasi — Belum Dilakukan', expired:'Simulasi — Expired' }
-  };
-  var title = (titleMap[type] && titleMap[type][status]) || 'Detail';
-
-  // Ambil list item sesuai tipe dari hoRawData
-  var sourceItems = [];
-  if (hoRawData) {
-    if (type === 'hl')    sourceItems = hoRawData.hlItems    || [];
-    if (type === 'riksa') sourceItems = hoRawData.riksaItems || [];
-    if (type === 'sim')   sourceItems = hoRawData.simItems   || [];
-  }
-
-  // Filter sesuai status yang diklik
-  var filtered = sourceItems.filter(function(item) {
-    return item.status === status;
-  });
-
-  // Warna badge per status
-  var badgeStyle = {
-    aktif    : 'background:#e0f4ff;color:#005f92;',
-    perhatian: 'background:#fef3c7;color:#b45309;',
-    expired  : 'background:#fee2e2;color:#dc2626;',
-    belum    : 'background:#f1f5f9;color:#64748b;'
-  };
-  var badgeLbl = { aktif:'Aktif', perhatian:'Perhatian', expired:'Expired', belum:'Belum' };
-
-  var listHtml = '';
-  if (!filtered.length) {
-    listHtml = '<p style="text-align:center;color:#94a3b8;font-size:13px;padding:24px 0;">Tidak ada data dengan status ini.</p>';
-  } else {
-    // Kelompokkan per unit agar lebih mudah dibaca
-    var grouped = {};
-    filtered.forEach(function(item) {
-      if (!grouped[item.unit]) grouped[item.unit] = [];
-      grouped[item.unit].push(item);
-    });
-
-    Object.keys(grouped).sort().forEach(function(unit) {
-      listHtml += '<div style="margin-bottom:6px;">' +
-        '<p style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.1em;text-transform:uppercase;padding:10px 0 4px;">' + unit + '</p>';
-
-      grouped[unit].forEach(function(item) {
-        var namaLabel = '';
-        if (type === 'hl')    namaLabel = boilerLabelFix(item.unit, item.boiler);
-        if (type === 'riksa') namaLabel = boilerNoFix(item.unit, item.boiler); // sudah "Boiler 1" dst
-        if (type === 'sim')   namaLabel = item.shift;  // "Shift 1" / "Shift 2"
-
-        var tglLabel  = item.tgl    ? '📅 ' + fmtDate(item.tgl)    : '—';
-        var expLabel  = item.expiry ? '⏰ ' + fmtDate(item.expiry)  : '';
-        var sisaLabel = '';
-        if (item.daysLeft !== null && item.daysLeft !== undefined) {
-          if (item.daysLeft < 0) {
-            sisaLabel = ' · ' + Math.abs(item.daysLeft) + 'h lalu';
-          } else {
-            sisaLabel = ' · sisa ' + item.daysLeft + 'h';
-          }
-        }
-
-        listHtml +=
-          '<div style="display:flex;align-items:flex-start;justify-content:space-between;padding:12px 0;border-bottom:1px solid #f1f5f9;">' +
-            '<div style="flex:1;min-width:0;">' +
-              '<p style="font-size:14px;font-weight:700;color:#111;margin:0;">' + namaLabel + '</p>' +
-              '<p style="font-size:12px;color:#6b7280;margin:3px 0 0;">' + tglLabel +
-                (expLabel ? '&nbsp;&nbsp;' + expLabel : '') +
-                (sisaLabel ? '<span style="font-weight:700;color:' +
-                  (item.daysLeft < 0 ? '#dc2626' : item.daysLeft <= 30 ? '#d97706' : '#0077B6') + ';">' + sisaLabel + '</span>' : '') +
-              '</p>' +
-            '</div>' +
-            '<span style="flex-shrink:0;margin-left:10px;padding:4px 10px;border-radius:100px;font-size:11px;font-weight:700;' + (badgeStyle[item.status]||'') + '">' +
-              (badgeLbl[item.status]||item.status) +
-            '</span>' +
-          '</div>';
-      });
-
-      listHtml += '</div>';
-    });
-  }
-
-  // Hapus modal lama
-  var existing = document.getElementById('ho-detail-modal');
-  if (existing) existing.remove();
-
-  var modalHtml =
-    '<div class="ho-modal open" id="ho-detail-modal">' +
-      '<div class="ho-modal-overlay" onclick="closeHODetailModal()"></div>' +
-      '<div class="ho-modal-sheet">' +
-        '<div class="ho-modal-handle"></div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">' +
-          '<div>' +
-            '<h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">' + title + '</h3>' +
-            '<p style="font-size:12px;color:#94a3b8;margin-top:2px;">' + filtered.length + ' item ditemukan</p>' +
-          '</div>' +
-          '<button onclick="closeHODetailModal()" style="width:36px;height:36px;border-radius:50%;border:none;background:#f1f5f9;cursor:pointer;font-size:18px;color:#6b7280;display:flex;align-items:center;justify-content:center;">&times;</button>' +
-        '</div>' +
-        '<div class="ho-modal-body">' +
-          hmSearchBarHtml('ho-detail-list-body', 'Cari boiler / shift...') +
-          '<div id="ho-detail-list-body" style="padding:0 0 40px;">' + listHtml + '</div>' +
-        '</div>' +
-      '</div>' +
-    '</div>';
-
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-
-function closeHODetailModal() {
-  var modal = document.getElementById('ho-detail-modal');
-  if (modal) modal.remove();
-}
-
-function openHOCategoryModal(type) {
-  var summary = (hoRawData && hoRawData.summary) ? hoRawData.summary[type] : null;
-  if (!summary) return;
-
-  var titleMap = { hl:'Heatloss', riksa:'Riksa Uji', sim:'Simulasi Darurat' };
-  var isSim = (type === 'sim');
-  var items = isSim
-    ? [
-        { key:'aktif',   num: summary.aktif||0,   label:'Aktif',   cls:'aktif' },
-        { key:'belum',   num: summary.belum||0,   label:'Belum',   cls:'perhatian' },
-        { key:'expired', num: summary.expired||0, label:'Expired', cls:'expired' }
-      ]
-    : [
-        { key:'aktif',     num: summary.aktif||0,     label:'Aktif',     cls:'aktif' },
-        { key:'perhatian', num: summary.perhatian||0, label:'Perhatian', cls:'perhatian' },
-        { key:'expired',   num: summary.expired||0,   label:'Expired',   cls:'expired' }
-      ];
-
-  var old = document.getElementById('ho-category-modal');
-  if (old) old.remove();
-
-  var cardsHtml = items.map(function(item) {
-    return '<div class="ho-stat-card ' + item.cls + '" onclick="document.getElementById(\'ho-category-modal\').remove();openHODetailModal(\'' + type + '\',\'' + item.key + '\')">' +
-      '<div class="ho-stat-num ' + item.cls + '">' + item.num + '</div>' +
-      '<div class="ho-stat-lbl">' + item.label + '</div>' +
-      '<div style="font-size:9px;color:#cbd5e1;margin-top:2px;">Tap detail ›</div>' +
-    '</div>';
-  }).join('');
-
-  var modalHtml =
-    '<div id="ho-category-modal" class="ho-modal open">' +
-      '<div class="ho-modal-overlay" onclick="document.getElementById(\'ho-category-modal\').remove()"></div>' +
-      '<div class="ho-modal-sheet">' +
-        '<div class="ho-modal-handle"></div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--border);">' +
-          '<h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">' + titleMap[type] + '</h3>' +
-          '<button onclick="document.getElementById(\'ho-category-modal\').remove()" style="width:36px;height:36px;border-radius:50%;border:none;background:#f1f5f9;cursor:pointer;font-size:18px;color:#6b7280;">&times;</button>' +
-        '</div>' +
-        '<div class="ho-modal-body"><div class="ho-stat-row" style="padding:16px;grid-template-columns:repeat(3,1fr);">' + cardsHtml + '</div></div>' +
-      '</div>' +
-    '</div>';
-
-  document.body.insertAdjacentHTML('beforeend', modalHtml);
-}
-
 
 // ── Assessment HO ─────────────────────────────────────────────
 function renderHOAssessment(allAssData) {
@@ -12745,17 +12253,6 @@ function renderHOHMDonut(res){
 /* ── HO: Efisiensi Boiler (di atas Assessment) ── */
 var _hoEfCache = null, _hoEfTime = 0, _hoEfChart = null;
 
-var _hoDashOrig = renderHODashboard;
-renderHODashboard = function(res){
-  _hoDashOrig(res);
-  var as = document.getElementById('ho-assess-section');
-  if(as && !document.getElementById('ho-ef-section')){
-    as.insertAdjacentHTML('beforebegin',
-      '<div class="ho-assess-wrap" id="ho-ef-section"><div style="height:60px;display:flex;align-items:center;justify-content:center;"><span class="spinner"></span></div></div>');
-  }
-  loadHOEfisiensi();
-};
-
 function openHOEfisiensiModal(){
   var d = window._hoEfData; if(!d) return;
   var rows = d.items.length ? d.items.map(function(it){
@@ -12776,93 +12273,6 @@ function openHOEfisiensiModal(){
     hmSearchBarHtml('ho-ef-list', 'Cari unit / boiler...') +
     '<div id="ho-ef-list" style="padding:0 0 30px;">' +
       '<p class="hx-sub">Nilai terbaru per boiler</p>' + rows + belum + '</div>');
-}
-
-/* ── HO: Assessment = donut dulu, list di modal ── */
-var _hoAssessOrig = renderHOAssessment;
-
-renderHOAssessment = function(all){
-  var section = document.getElementById('ho-assess-section');
-  if(!section) return;
-  window._hoAssAll = all;
-  var head = function(sub){
-    return '<div class="hx-head"><div><p class="hx-t">Assessment SOP &amp; IK</p><p class="hx-s">' + sub + '</p></div>' +
-           '<span class="hx-pill" onclick="openHOAssessmentList()">Lihat Detail ›</span></div>';
-  };
-  if(!all || !all.length){
-    section.innerHTML = head('Status lulus per unit') + '<p style="color:#94a3b8;font-size:13px;text-align:center;padding:20px 0;">Belum ada data assessment.</p>';
-    return;
-  }
-  var latest = all.reduce(function(m, d){ var y = parseInt(d.tahun, 10) || 0; return y > m ? y : m; }, 0);
-  var map = {};
-  all.filter(function(d){ return parseInt(d.tahun, 10) === latest; }).forEach(function(d){
-    var u = d.pabrik || '—', t = 0;
-    for(var i = 0; i < 7; i++) t += parseFloat(d.nilai && d.nilai[i]) || 0;
-    var avg = Math.round(t / 7);
-    if(!map[u]) map[u] = { t:0, c:0 };
-    map[u].t += avg; map[u].c++;
-  });
-  var lulus = 0, belumLulus = 0;
-  Object.keys(map).forEach(function(u){ (Math.round(map[u].t / map[u].c) >= 90) ? lulus++ : belumLulus++; });
-  var known = UNITS.filter(function(u){ return u !== 'Head office' && !u.toUpperCase().endsWith('B'); });
-  var ikut = Object.keys(map).map(function(u){ return u.toUpperCase(); });
-  var belumAss = known.filter(function(u){ return ikut.indexOf(u.toUpperCase()) === -1; }).length;
-  var total = lulus + belumLulus + belumAss;
-  var pct = total ? Math.round(lulus / total * 100) : 0;
-
-  var defs = [
-    { l:'Unit lulus', s:'rata-rata ≥ 90', n:lulus, c:'#00B4D8', tc:'#0077B6' },
-    { l:'Belum lulus', s:'rata-rata &lt; 90', n:belumLulus, c:'#f5be6e', tc:'#b45309' },
-    { l:'Belum assessment', s:'tahun ' + latest, n:belumAss, c:'#ee7b87', tc:'#dc2626' }
-  ];
-  section.innerHTML = head('Status unit · tahun ' + latest) +
-    '<div class="hx-row">' +
-      '<div class="hx-ring" onclick="openHOAssessmentList()"><canvas id="ho-assess-pie"></canvas>' +
-        '<div class="hx-ring-c"><b>' + pct + '%</b><span>Lulus</span></div></div>' +
-      '<div class="hx-stats">' + defs.map(function(d){
-        return '<div class="hx-st" onclick="openHOAssessmentList()"><span class="hx-dot" style="background:' + d.c + '"></span>' +
-          '<span class="hx-st-l">' + d.l + '<small>' + d.s + '</small></span><span class="hx-st-n" style="color:' + d.tc + '">' + d.n + '</span></div>';
-      }).join('') + '</div>' +
-    '</div>';
-
-  setTimeout(function(){
-    var cv = document.getElementById('ho-assess-pie');
-    if(!cv) return;
-    if(Chart.getChart && Chart.getChart(cv)) Chart.getChart(cv).destroy();
-    new Chart(cv.getContext('2d'), {
-      type:'doughnut',
-      data:{ datasets:[{
-        data: total > 0 ? [lulus, belumLulus, belumAss] : [1],
-        backgroundColor: total > 0 ? ['#00B4D8','#f5be6e','#ee7b87'] : ['#e2e8f0'],
-        borderWidth:0, borderRadius:12, spacing: total > 0 ? 3 : 0, hoverOffset:4 }] },
-      options:{ cutout:'58%', maintainAspectRatio:true, events:[],
-        plugins:{ legend:{display:false}, tooltip:{enabled:false} }, animation:{duration:700} }
-    });
-  }, 80);
-};
-
-function openHOAssessmentList(){
-  var dash = document.getElementById('ho-assess-section');
-  if(!dash || !window._hoAssAll) return;
-  closeHOAssessModal();
-  dash = document.getElementById('ho-assess-section');
-  dash.id = 'ho-assess-section-dash';
-  document.body.insertAdjacentHTML('beforeend',
-    '<div id="ho-assess-modal" class="ho-modal open">' +
-      '<div class="ho-modal-overlay" onclick="closeHOAssessModal()"></div>' +
-      '<div class="ho-modal-sheet"><div class="ho-modal-handle"></div>' +
-        '<div style="display:flex;justify-content:space-between;align-items:center;padding:16px 16px 12px;border-bottom:1px solid var(--border);flex-shrink:0;">' +
-          '<div><h3 style="font-size:16px;font-weight:800;color:#111;margin:0;">Assessment SOP &amp; IK</h3>' +
-          '<p style="font-size:12px;color:#94a3b8;margin-top:2px;">Detail nilai per unit</p></div>' +
-          '<button onclick="closeHOAssessModal()" style="width:36px;height:36px;border-radius:50%;border:none;background:#f1f5f9;cursor:pointer;font-size:18px;color:#6b7280;">&times;</button>' +
-        '</div>' +
-        '<div class="ho-modal-body"><div id="ho-assess-section" style="padding-top:12px;"></div></div>' +
-      '</div></div>');
-  _hoAssessOrig(window._hoAssAll);
-}
-function closeHOAssessModal(){
-  var m = document.getElementById('ho-assess-modal'); if(m) m.remove();
-  var d = document.getElementById('ho-assess-section-dash'); if(d) d.id = 'ho-assess-section';
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -13385,7 +12795,7 @@ function hoAssBelum(all){
 }
 
 /* ── Dashboard HO: grid tombol ── */
-renderHODashboard = function(res){
+function renderHODashboard(res){
   var el = document.getElementById('ho-content'); if(!el) return;
 
   // BKPM hanya 1 shift (sama seperti versi lama)
@@ -13432,39 +12842,6 @@ renderHODashboard = function(res){
     return r;
   };
 });
-var _hoAssW = renderHOAssessment;
-renderHOAssessment = function(all){
-  window._hoAssAll = all;                 // wajib: dipakai openHOAssessmentList walau section belum terbuka
-  _hoAssW(all);
-  try{ hoRefreshDots(); }catch(e){}
-};
-
-/* ── Review dokumen (dulu banner, sekarang tombol + modal) ── */
-function openHOPendingModal(){
-  var items = (window._hoPending || []).slice();
-  if(!items.length){
-    hxModal('ho-pending-modal', 'Review Dokumen', 'Tidak ada',
-      '<div class="hx-ok" style="margin-top:14px;">✅ Tidak ada dokumen menunggu review.</div>');
-    return;
-  }
-  items.sort(function(a, b){ return String(a.pabrik).localeCompare(String(b.pabrik)); });
-  var units = {}; items.forEach(function(i){ units[i.pabrik] = 1; });
-  var rows = items.map(function(item){
-    var tipe = item.tipe === 'heatloss' ? '🌡️ Heatloss' : '📋 Riksa';
-    var bl   = /^boiler\s/i.test(item.boiler) ? item.boiler : 'Boiler ' + item.boiler;
-    return '<div class="hx-li hm-searchable-row" style="cursor:default;"><div class="hx-li-m">' +
-      '<div class="hx-li-n">' + lcEsc(item.pabrik) + ' · ' + tipe + ' · ' + lcEsc(bl) + '</div>' +
-      '<div class="hx-li-d">' + lcEsc(item.timestamp) + ' · by ' + lcEsc(item.email || '—') + '</div></div>' +
-      (item.fileUrl
-        ? '<a href="' + item.fileUrl + '" target="_blank" style="padding:6px 12px;border-radius:8px;font-size:11px;font-weight:700;background:#0077B6;color:white;text-decoration:none;">Review ›</a>'
-        : '<span style="font-size:11px;color:#94a3b8;">No file</span>') +
-    '</div>';
-  }).join('');
-  hxModal('ho-pending-modal', 'Review Dokumen',
-    items.length + ' dokumen dari ' + Object.keys(units).length + ' unit',
-    hmSearchBarHtml('ho-pending-list', 'Cari unit / boiler...') +
-    '<div id="ho-pending-list" style="padding:0 0 30px;">' + rows + '</div>');
-}
 
 /* ── Performance Boiler: rekap HO ── */
 var _hoPfCache = null, _hoPfTime = 0;
@@ -13557,6 +12934,58 @@ function loadHOPerformance(force){
 }
 function hoPfRetry(){ _hoPfCache = null; openHOPerformanceList(true); }
 
+var _hoPfCharts = [];
+function hoPfSummaryHtml(d){
+  var s = d.sudah.length, b = d.belum.length, t = s + b, pct = t ? Math.round(s / t * 100) : 0;
+  var stale = {};
+  d.belum.forEach(function(u){ var k = u.last || 'Belum pernah'; stale[k] = (stale[k] || 0) + 1; });
+  var keys = Object.keys(stale);
+
+  setTimeout(function(){
+    _hoPfCharts.forEach(function(c){ try{ c.destroy(); }catch(e){} }); _hoPfCharts = [];
+    Chart.defaults.font.family = WTP_FONT;
+    var a = document.getElementById('ho-pf-donut');
+    if(a) _hoPfCharts.push(new Chart(a.getContext('2d'), {
+      type:'doughnut',
+      data:{ datasets:[{ data: t ? [s, b] : [1], backgroundColor: t ? ['#00B4D8','#ee7b87'] : ['#e2e8f0'],
+        borderWidth:0, borderRadius:12, spacing:(s && b) ? 3 : 0 }] },
+      options:{ cutout:'70%', maintainAspectRatio:true, events:[], plugins:{ legend:{display:false}, tooltip:{enabled:false} }, animation:{duration:700} }
+    }));
+    var c = document.getElementById('ho-pf-bar');
+    if(c && keys.length) _hoPfCharts.push(new Chart(c.getContext('2d'), {
+      type:'bar',
+      data:{ labels:keys, datasets:[{ data:keys.map(function(k){ return stale[k]; }), backgroundColor:'#ee7b87',
+        borderRadius:WTP_BAR_RADIUS, borderSkipped:false, maxBarThickness:46 }] },
+      plugins:[{ id:'pfCnt', afterDatasetsDraw:function(ch){
+        var x = ch.ctx;
+        ch.getDatasetMeta(0).data.forEach(function(bar, i){
+          x.save(); x.fillStyle = '#b4303f'; x.font = '800 11px ' + WTP_FONT; x.textAlign = 'center';
+          x.fillText(ch.data.datasets[0].data[i], bar.x, bar.y - 6); x.restore();
+        });
+      } }],
+      options:{ maintainAspectRatio:false, layout:{ padding:{ top:20 } },
+        plugins:{ legend:{display:false}, tooltip:{ callbacks:{ label:function(c){ return ' ' + c.parsed.y + ' unit'; } } } },
+        scales:{ x:{ grid:{display:false}, border:{display:false}, ticks:{ font:{size:10,weight:'700'}, color:'#64748b' } },
+                 y:{ beginAtZero:true, display:false, grid:{display:false}, border:{display:false} } } }
+    }));
+  }, 80);
+
+  return '<div class="ice-card" style="margin-bottom:14px;">' +
+    '<p class="hx-t">Pemenuhan Data · ' + d.target.label + '</p>' +
+    '<p class="hx-s" style="margin-bottom:12px;">Unit yang sudah mengisi performance bulan ini</p>' +
+    '<div class="hx-row">' +
+      '<div class="hx-ring" style="cursor:default;"><canvas id="ho-pf-donut"></canvas>' +
+        '<div class="hx-ring-c"><b>' + pct + '%</b><span>Terisi</span></div></div>' +
+      '<div class="hx-stats">' +
+        '<div class="hx-st" style="cursor:default;"><span class="hx-dot" style="background:#00B4D8"></span><span class="hx-st-l">Sudah mengisi</span><span class="hx-st-n" style="color:#0077B6">' + s + '</span></div>' +
+        '<div class="hx-st" style="cursor:default;"><span class="hx-dot" style="background:#ee7b87"></span><span class="hx-st-l">Belum mengisi</span><span class="hx-st-n" style="color:#dc2626">' + b + '</span></div>' +
+      '</div>' +
+    '</div>' +
+    (keys.length ? '<div class="hx-sep"></div><p class="hx-sub">Unit belum mengisi · data terakhir</p>' +
+      '<div style="height:160px;position:relative;"><canvas id="ho-pf-bar"></canvas></div>' : '') +
+  '</div>';
+}
+
 function openHOPerformanceList(inPlace){
   var wrap = document.getElementById('ho-pf-wrap');
   if(inPlace !== true || !wrap){
@@ -13579,72 +13008,13 @@ function openHOPerformanceList(inPlace){
   }
   var belum = d.belum.map(function(u){ return row(u, false); }).join('') || '<div class="hx-ok">✅ Semua unit sudah mengisi.</div>';
   var sudah = d.sudah.map(function(u){ return row(u, true); }).join('') || '<p style="color:#94a3b8;font-size:13px;padding:8px 0;">Belum ada.</p>';
-  wrap.innerHTML = '<div class="ice-card">' +
+  wrap.innerHTML = hoPfSummaryHtml(d) + '<div class="ice-card">' +
     '<p class="hx-s" style="margin:0 0 8px;">Data ' + d.target.label + ' · ' + d.sudah.length + ' sudah · ' + d.belum.length + ' belum · klik unit untuk detail</p>' +
     hmSearchBarHtml('ho-pf-list', 'Cari unit...') +
     '<div id="ho-pf-list">' +
       '<p class="hx-sub" style="color:#dc2626;margin-top:6px;">Belum mengisi (' + d.belum.length + ')</p>' + belum +
       '<p class="hx-sub" style="color:#0077B6;margin-top:18px;">Sudah mengisi (' + d.sudah.length + ')</p>' + sudah +
     '</div></div>';
-}
-
-/* ── WTP Internal: PIE, style sama dgn donut "Summary Status Keseluruhan" ── */
-function renderHOWtpDonuts(res){
-  if(res && res.status === 'success' && res.params) window._hoWtpParams = res.params;
-  var section = document.getElementById('ho-wtp-section');
-  if(!section) return;
-  var title = '<p class="dk-title">Water Quality · Parameter Air WTP — Semua Unit</p>';
-
-  if(!res || res.status !== 'success' || !res.params){
-    section.innerHTML = title + '<p style="color:rgba(255,255,255,.65);font-size:13px;text-align:center;padding:20px 0;">Data belum tersedia.</p>';
-    return;
-  }
-  var ORDER = ['pH','M-Alk','Silica','O-Alk/Silica','Sulfite','TDS','Phosphate'];
-  var labels = ORDER.filter(function(l){ return res.params.hasOwnProperty(l); });
-
-  var html = title + '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px 10px;">';
-  labels.forEach(function(lbl, i){
-    var d = res.params[lbl], n = d.normalUnits.length, b = d.belowUnits.length, t = n + b;
-    var pct = t ? Math.round(n / t * 100) : 0;
-    html +=
-      '<div style="text-align:center;cursor:pointer;" onclick="openWtpHODetailModal(\'' + lbl.replace(/'/g, "\\'") + '\')">' +
-        '<p style="font-size:10px;font-weight:700;color:#94a3b8;letter-spacing:.08em;text-transform:uppercase;margin-bottom:8px;">' + lbl + '</p>' +
-        '<div style="position:relative;display:inline-block;width:100%;max-width:100px;aspect-ratio:1/1;">' +
-          '<canvas id="wtp-ho-pie-' + i + '" style="width:100%;height:100%;display:block;"></canvas>' +
-        '</div>' +
-        '<p style="font-size:15px;font-weight:900;color:var(--text-1);margin:6px 0 0;line-height:1;">' + pct + '%</p>' +
-        '<div style="margin-top:6px;display:flex;justify-content:center;gap:7px;flex-wrap:wrap;">' +
-          hoLegendInline('#00B4D8', 'Normal', n) + hoLegendInline('#ef4444', 'Di bawah', b) +
-        '</div>' +
-      '</div>';
-  });
-  html += '</div><p style="font-size:10px;color:rgba(255,255,255,.4);margin:14px 0 0;text-align:center;">Tap untuk detail ›</p>';
-  section.innerHTML = html;
-
-  setTimeout(function(){
-    Chart.defaults.font.family = WTP_FONT;
-    labels.forEach(function(lbl, i){
-      var cv = document.getElementById('wtp-ho-pie-' + i); if(!cv) return;
-      var d = res.params[lbl], n = d.normalUnits.length, b = d.belowUnits.length, has = (n + b) > 0;
-      if(Chart.getChart && Chart.getChart(cv)) Chart.getChart(cv).destroy();
-      new Chart(cv.getContext('2d'), {
-        type: 'pie',
-        data: { labels:['Normal','Di bawah standar'], datasets:[{
-          data: has ? [n, b] : [1],
-          backgroundColor: has ? ['#00B4D8', '#ef4444'] : ['#e2e8f0'],
-          borderWidth: 0, borderRadius: 12, spacing: (n > 0 && b > 0) ? 3 : 0, hoverOffset: 4 }] },
-        options: {
-          maintainAspectRatio: true,
-          plugins: {
-            legend: { display: false },
-            tooltip: { enabled: has, backgroundColor: 'rgba(3,4,94,.96)', padding: 12, cornerRadius: 12,
-              callbacks: { label: function(c){ return ' ' + c.label + ': ' + c.parsed + ' unit'; } } }
-          },
-          animation: { duration: 600 }
-        }
-      });
-    });
-  }, 80);
 }
 
 /* ═══════════════════════════════════════════════════════════
