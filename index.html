@@ -1945,7 +1945,8 @@ i.fa-solid,i.fa-regular,i.fa-brands{display:inline-block;}
 .an-view{flex:1;min-width:0;overflow:hidden;white-space:nowrap;display:flex;align-items:center;
   -webkit-mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);
   mask-image:linear-gradient(90deg,transparent,#000 14px,#000 calc(100% - 14px),transparent);}
-.an-track{display:inline-flex;padding-left:100%;will-change:transform;animation:anRun var(--d,20s) linear infinite;}
+.an-track{display:inline-flex;padding-left:100%;will-change:transform;}
+.an-track.run{animation:anRun var(--d,12s) linear forwards;}
 .an-view:active .an-track{animation-play-state:paused;}
 @keyframes anRun{to{transform:translateX(-100%)}}
 .an-it{display:inline-flex;align-items:center;gap:8px;padding-right:56px;font-size:12.5px;font-weight:700;}
@@ -10715,16 +10716,23 @@ function anLoad(unit){
 }
 
 function anRender(){
-  var one = anList.map(function(a){
-    var t = AN_IC[a.tipe] ? a.tipe : 'info';
-    return '<span class="an-it ' + t + '"><i class="fa-solid ' + AN_IC[t] + '"></i>' + lcEsc(a.msg) + '</span>';
-  }).join('');
-  var len = anList.reduce(function(s, a){ return s + a.msg.length + 8; }, 0);
   document.querySelectorAll('[data-an]').forEach(function(bar){
-    if(!one){ bar.classList.remove('show'); bar.innerHTML = ''; return; }
+    if(!anList.length){ bar.classList.remove('show'); bar.innerHTML = ''; return; }
     bar.innerHTML = '<div class="an-ic"><i class="fa-solid fa-bullhorn"></i></div>' +
-      '<div class="an-view"><div class="an-track" style="--d:' + Math.max(12, Math.round(len * 0.17 + 8)) + 's">' + one + '</div></div>';
+      '<div class="an-view"><div class="an-track"></div></div>';
     bar.classList.add('show');
+    var tr = bar.querySelector('.an-track'), i = 0;
+    function next(){
+      var a = anList[i % anList.length]; i++;
+      var t = AN_IC[a.tipe] ? a.tipe : 'info';
+      tr.classList.remove('run');
+      tr.innerHTML = '<span class="an-it ' + t + '"><i class="fa-solid ' + AN_IC[t] + '"></i>' + lcEsc(a.msg) + '</span>';
+      tr.style.setProperty('--d', Math.max(8, Math.round(a.msg.length * 0.25 + 6)) + 's');
+      void tr.offsetWidth;
+      tr.classList.add('run');
+    }
+    tr.addEventListener('animationend', function(){ setTimeout(next, 600); });
+    next();
   });
 }
 
@@ -13260,6 +13268,7 @@ function hoCatRender(type,status){
 }
 
 /* ── 7. Assessment: donut + daftar detail LANGSUNG di bawahnya (tanpa modal) ── */
+var _hoAssessOrig = renderHOAssessment;
 renderHOAssessment=function(all){
   window._hoAssAll=all;
   var section=document.getElementById('ho-assess-section');
