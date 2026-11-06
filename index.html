@@ -9795,18 +9795,30 @@ function lcRenderSlide(){
                         '<i class="fa-solid fa-rotate-right"></i>' + 
                         '</button>';
 
-    body.innerHTML='<div id="lc-img-container" style="position:relative;width:100%;height:100%;display:flex;align-items:center;justify-content:center;overflow:hidden;touch-action:none;">' +
-                   '<img id="lc-main-img" src="'+imgUrl+'" style="max-width:100%;max-height:100%;object-fit:contain;transform-origin:center;will-change:transform;" />' +
+    // sumber gambar untuk watermark (lh3 mendukung CORS untuk canvas)
+    var wmSrc = url;
+    if(url && url.includes('drive.google.com')){
+        var m3 = url.match(/[-\w]{25,}/);
+        if(m3) wmSrc = 'https://lh3.googleusercontent.com/d/' + m3[0];
+    }
+    var stackCss = 'position:absolute;inset:0;width:100%;height:100%;object-fit:contain;-webkit-user-drag:none;user-select:none;';
+
+    body.innerHTML='<div id="lc-img-container" style="position:relative;width:100%;height:100%;overflow:hidden;touch-action:none;">' +
+                   '<div id="lc-img-wrap" style="position:absolute;inset:0;transform-origin:center;will-change:transform;">' +
+                     '<img id="lc-main-img" src="'+imgUrl+'" draggable="false" style="'+stackCss+'z-index:1;pointer-events:none;" />' +
+                     '<img id="lc-main-img-wm" src="'+wmSrc+'" draggable="false" alt="" style="'+stackCss+'z-index:2;opacity:.01;" />' +
+                   '</div>' +
                    rotateBtnHtml +
                    '</div>';
-                   
+
     lcInitSmoothTouch();
+    lcApplyWatermark(wmSrc);
   }
 }
 
 function lcInitSmoothTouch() {
   const container = document.getElementById('lc-img-container');
-  const img = document.getElementById('lc-main-img');
+  const img = document.getElementById('lc-img-wrap');
   const rotateBtn = document.getElementById('lc-rotate-btn');
   if (!container || !img) return;
 
@@ -9911,6 +9923,76 @@ function lcInitSmoothTouch() {
     if(scale === 1) { pointX = 0; pointY = 0; }
     updateTransform();
   }, { passive: false });
+}
+
+/* ═══ WATERMARK SAAT DISIMPAN (Learning Centre) ═══ */
+var LC_WM_LOGO_URL = 'https://lh3.googleusercontent.com/d/1RpuNBKjnn9HXExJFvs3W_IM06xnvKBWY';
+var _lcWmLogoPromise = null;
+var _lcWmBlobUrl = null;
+
+function lcLoadImgCors(src){
+  return new Promise(function(resolve, reject){
+    var im = new Image();
+    im.crossOrigin = 'anonymous';
+    im.referrerPolicy = 'no-referrer';
+    im.onload  = function(){ resolve(im); };
+    im.onerror = function(){ reject(new Error('load gagal')); };
+    im.src = src;
+  });
+}
+function lcGetWmLogo(){
+  if(!_lcWmLogoPromise) _lcWmLogoPromise = lcLoadImgCors(LC_WM_LOGO_URL);
+  return _lcWmLogoPromise;
+}
+
+function lcBuildWatermarked(src){
+  return Promise.all([lcLoadImgCors(src), lcGetWmLogo()]).then(function(r){
+    var img = r[0], logo = r[1];
+    var scale = Math.min(1, 2000 / img.naturalWidth);
+    var W = Math.round(img.naturalWidth * scale), H = Math.round(img.naturalHeight * scale);
+
+    var c = document.createElement('canvas');
+    c.width = W; c.height = H;
+    var ctx = c.getContext('2d');
+    ctx.drawImage(img, 0, 0, W, H);
+
+    // pola logo berulang diagonal
+    var lw = Math.max(120, W * 0.22), lh = lw * (logo.naturalHeight / logo.naturalWidth);
+    ctx.save();
+    ctx.globalAlpha = 0.28;
+    ctx.translate(W / 2, H / 2);
+    ctx.rotate(-Math.PI / 6);
+    var stepX = lw * 1.9, stepY = lh * 3.2, span = Math.hypot(W, H);
+    for(var y = -span; y < span; y += stepY){
+      for(var x = -span; x < span; x += stepX){ ctx.drawImage(logo, x, y, lw, lh); }
+    }
+    ctx.restore();
+
+    // satu logo besar di tengah
+    ctx.save();
+    ctx.globalAlpha = 0.35;
+    var bw = W * 0.45, bh = bw * (logo.naturalHeight / logo.naturalWidth);
+    ctx.drawImage(logo, (W - bw) / 2, (H - bh) / 2, bw, bh);
+    ctx.restore();
+
+    return new Promise(function(resolve, reject){
+      c.toBlob(function(b){ b ? resolve(URL.createObjectURL(b)) : reject(new Error('toBlob gagal')); }, 'image/jpeg', 0.92);
+    });
+  });
+}
+
+function lcApplyWatermark(src){
+  var top = document.getElementById('lc-main-img-wm');
+  if(!top) return;
+  lcBuildWatermarked(src).then(function(url){
+    var el = document.getElementById('lc-main-img-wm');
+    if(!el || el !== top){ URL.revokeObjectURL(url); return; } // sudah pindah slide
+    if(_lcWmBlobUrl){ try{ URL.revokeObjectURL(_lcWmBlobUrl); }catch(e){} }
+    _lcWmBlobUrl = url;
+    el.src = url;   // inilah yang tersimpan saat "Save image as"
+  }).catch(function(e){
+    console.warn('Watermark gagal:', e.message); // gambar asli tetap tampil
+  });
 }
 
 function lcSlideChange(dir){
